@@ -5,10 +5,20 @@ import os
 import streamlit as st
 
 # ---------- AUTHENTICATION ----------
-OWNER_EMAIL = st.secrets["OWNER_EMAIL"]
+OWNER_PASSWORD = "123"
 
-user = st.user
-IS_OWNER = user.email == OWNER_EMAIL
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    pwd = st.text_input("Enter password to edit data:", type="password")
+    if pwd == OWNER_PASSWORD:
+        st.session_state.authenticated = True
+    else:
+        st.info("Viewer mode — forms are hidden")
+        st.session_state.authenticated = False
+
+IS_OWNER = st.session_state.authenticated
 
 # ---------- APP SETUP ----------
 st.set_page_config(page_title="Portfolio Tracker", layout="wide")
