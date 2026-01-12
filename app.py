@@ -7,7 +7,7 @@ import streamlit as st
 # ---------- AUTHENTICATION ----------
 OWNER_EMAIL = st.secrets["OWNER_EMAIL"]
 
-user = st.experimental_user
+user = st.user
 IS_OWNER = user.is_logged_in and user.email == OWNER_EMAIL
 
 # ---------- APP SETUP ----------
@@ -98,7 +98,7 @@ else:
                 st.success("Contribution added")
     else:
         st.info("Viewer mode (read-only)")
-        
+
 st.divider()
 
 # ---------- PORTFOLIO SUMMARY ----------
