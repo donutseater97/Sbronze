@@ -8,7 +8,7 @@ import streamlit as st
 OWNER_EMAIL = st.secrets["OWNER_EMAIL"]
 
 user = st.user
-IS_OWNER = user.is_logged_in and user.email == OWNER_EMAIL
+IS_OWNER = user.email == OWNER_EMAIL
 
 # ---------- APP SETUP ----------
 st.set_page_config(page_title="Portfolio Tracker", layout="wide")
