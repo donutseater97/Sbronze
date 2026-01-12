@@ -78,7 +78,8 @@ else:
                 "date": contrib_date,
                 "quantity": quantity,
                 "price": price,
-                "fees": fees
+                "fees": fees,
+                "is_dca": st.checkbox("Is DCA?")
             }])
             contributions = pd.concat([contributions, new_contrib], ignore_index=True)
             contributions.to_csv(CONTRIB_FILE, index=False)
