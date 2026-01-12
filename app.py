@@ -147,19 +147,27 @@ if len(contributions) > 0:
     st.bar_chart(alloc)
 
     # ----- Invested over time -----
-    df["date"] = pd.to_datetime(df["date"])  # ensure datetime
-    time_df = df.groupby("date")["invested"].sum().reset_index()
-    time_df = time_df.sort_values("date")
-    time_df = time_df.set_index("date")
-    st.subheader("Invested Over Time")
-    st.line_chart(time_df)
+    # Convert to datetime safely
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")  # invalid dates -> NaT
+    df = df.dropna(subset=["date"])  # remove invalid dates
+    if len(df) > 0:
+        time_df = df.groupby("date")["invested"].sum().reset_index()
+        time_df = time_df.sort_values("date")
+        time_df = time_df.set_index("date")
+        st.subheader("Invested Over Time")
+        st.line_chart(time_df)
+    else:
+        st.info("No valid dates for 'Invested Over Time' chart")
 
     # ----- Monthly totals -----
-    df["month"] = df["date"].dt.to_period("M").astype(str)
-    monthly = df.groupby("month")["invested"].sum().reset_index()
-    monthly = monthly.set_index("month")
-    st.subheader("Monthly Investments")
-    st.bar_chart(monthly)
+    if len(df) > 0:
+        df["month"] = df["date"].dt.to_period("M").astype(str)
+        monthly = df.groupby("month")["invested"].sum().reset_index()
+        monthly = monthly.set_index("month")
+        st.subheader("Monthly Investments")
+        st.bar_chart(monthly)
+    else:
+        st.info("No valid dates for 'Monthly Investments' chart")
 
 else:
     st.info("No contributions yet")
