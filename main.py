@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 import os
 import altair as alt
+import yfinance as yf
 
 # ---------- AUTHENTICATION ----------
 OWNER_PASSWORD = "123"
@@ -36,9 +37,55 @@ def load_data():
 
 funds, transactions = load_data()
 
-# Build FUND_COLORS from funds data
+# Build FUND_COLORS and HISTORICAL_FUND_MAPPING from funds data
 for _, row in funds.iterrows():
     FUND_COLORS[row["Fund"]] = row["Colour"]
+
+# ---------- HISTORICAL PRICES DATA FETCHING ----------
+# Build fund mapping from funds.csv: Morningstar ID -> Yahoo Finance symbol (.F suffix)
+morningstar_id_to_fund_name = {row["Ticker"]: row["Fund"] for _, row in funds.iterrows()}
+fund_names = list(morningstar_id_to_fund_name.values())
+yahoo_finance_symbols = [f"{mid}.F" for mid in morningstar_id_to_fund_name.keys()]
+morningstar_id_to_yahoo_symbol = {mid: f"{mid}.F" for mid in morningstar_id_to_fund_name.keys()}
+fund_map = {symbol: name for symbol, name in zip(yahoo_finance_symbols, fund_names)}
+
+def get_historical_prices_df(start_date: str = "2024-01-01", end_date: str | None = None,
+                             use_adj_close: bool = True, dropna: bool = True) -> pd.DataFrame:
+    """Return pivoted dataframe with date and fund columns using yfinance.
+
+    Columns: [date] + fund_names
+    """
+    if end_date is None:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+
+    raw = yf.download(yahoo_finance_symbols, start=start_date, end=end_date, interval="1d", progress=False)
+
+    if use_adj_close and "Adj Close" in raw.columns.get_level_values(0):
+        df_close = raw["Adj Close"].rename(columns=fund_map)
+    else:
+        df_close = raw["Close"].rename(columns=fund_map)
+
+    df_close = df_close.sort_index().ffill()
+    if dropna:
+        df_close = df_close.dropna()
+
+    df_pivot = df_close.reset_index()
+    df_pivot["Date"] = pd.to_datetime(df_pivot["Date"]).dt.strftime("%Y-%m-%d")
+    df_pivot = df_pivot[["Date"] + fund_names]
+    df_pivot = df_pivot.rename(columns={"Date": "date"})
+    return df_pivot
+
+@st.cache_data(ttl=3600)
+def load_historical_prices(start: str = "2024-01-01"):
+    try:
+        df = get_historical_prices_df(start_date=start)
+    except Exception:
+        # Fallback to CSV if available
+        if os.path.exists("historical_data.csv"):
+            df = pd.read_csv("historical_data.csv")
+        else:
+            df = pd.DataFrame(columns=["date"] + funds["Fund"].tolist())
+    return df
 
 # ---------- OPTIONAL MIGRATION FROM contributions.csv ----------
 def migrate_contributions_to_transactions(funds_df):
@@ -536,6 +583,161 @@ def active_funds():
     else:
         st.info("No funds added yet")
 
+def historical_prices():
+    st.header("📈 Fund NAV (History)")
+    
+    # Refresh button
+    if st.button("🔄 Refresh Data", help="Re-fetch latest data from Yahoo Finance"):
+        st.cache_data.clear()
+        st.rerun()
+    
+    hist_df = load_historical_prices()
+    if len(hist_df) == 0:
+        st.info("No historical data available yet")
+        return
+
+    # Ensure only known funds and date
+    fund_cols = [c for c in hist_df.columns if c in funds["Fund"].tolist()]
+    hist_df_display = hist_df[["date"] + fund_cols].copy()
+    hist_df_display["date"] = pd.to_datetime(hist_df_display["date"]) 
+
+    # Fund filter buttons (same style as Transaction History)
+    if "historical_fund_filter" not in st.session_state:
+        st.session_state.historical_fund_filter = fund_cols
+    if "hist_view_mode" not in st.session_state:
+        st.session_state.hist_view_mode = "grid"
+
+    if len(fund_cols) > 0:
+        st.markdown("**Filter by Fund:**")
+        fund_button_css = "<style>"
+        for fund in fund_cols:
+            hex_color = FUND_COLORS.get(fund, "#999999")
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            fund_button_css += f"""
+            button[data-testid=\"baseButton-primary\"][aria-label=\"{fund}\"] {{
+                background-color: rgba(200, 200, 200, 0.8) !important;
+                border: none !important;
+                color: rgb({r}, {g}, {b}) !important;
+                font-weight: 600 !important;
+            }}
+            """
+        fund_button_css += "</style>"
+        st.markdown(fund_button_css, unsafe_allow_html=True)
+
+        num_cols = len(fund_cols) + 1
+        cols = st.columns(num_cols)
+        for idx, fund in enumerate(fund_cols):
+            with cols[idx]:
+                is_active = fund in st.session_state.historical_fund_filter
+                if st.button(fund, key=f"hist_btn_{fund}", type="primary" if is_active else "secondary", use_container_width=True):
+                    if is_active:
+                        st.session_state.historical_fund_filter.remove(fund)
+                    else:
+                        st.session_state.historical_fund_filter.append(fund)
+                    st.rerun()
+        with cols[-1]:
+            if st.button("✕", key="reset_hist_filters", help="Reset filters", use_container_width=True):
+                st.session_state.historical_fund_filter = fund_cols
+                st.rerun()
+        selected_funds = st.session_state.historical_fund_filter
+    else:
+        selected_funds = []
+
+    # Date range filters + controls
+    col1, col2, col3 = st.columns([2, 2, 1.5])
+    with col1:
+        min_d = hist_df_display["date"].min().date()
+        start_d = st.date_input("Start", value=min_d, key="hist_start_date")
+    with col2:
+        max_d = hist_df_display["date"].max().date()
+        end_d = st.date_input("End", value=max_d, key="hist_end_date")
+    with col3:
+        st.markdown("")
+        view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
+        use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
+        st.session_state.hist_view_mode = "combined" if use_combined else "grid"
+
+    plot_df = hist_df_display[(hist_df_display["date"] >= pd.to_datetime(start_d)) & (hist_df_display["date"] <= pd.to_datetime(end_d))]
+    if not selected_funds:
+        st.info("Select at least one fund")
+        return
+
+    # Combined view
+    if st.session_state.hist_view_mode == "combined":
+        long_df = plot_df.melt(id_vars=["date"], value_vars=selected_funds, var_name="Fund", value_name="NAV")
+        color_scale = alt.Scale(domain=list(FUND_COLORS.keys()), range=list(FUND_COLORS.values()))
+        combined_chart = (
+            alt.Chart(long_df).mark_line(strokeWidth=2).encode(
+                x=alt.X("date:T", title="Date"),
+                y=alt.Y("NAV:Q", title="NAV (€)"),
+                color=alt.Color("Fund:N", scale=color_scale),
+                tooltip=["date:T", "Fund:N", alt.Tooltip("NAV:Q", format=",.2f")],
+            ).properties(height=400)
+        )
+        st.altair_chart(combined_chart, use_container_width=True)
+    else:
+        # Grid view with dynamic y-axis scaling per fund
+        show_funds = selected_funds[:6]
+        if len(selected_funds) > 6:
+            st.warning("Showing first 6 funds; reduce selection for larger charts.")
+
+        rows = [show_funds[i:i+3] for i in range(0, len(show_funds), 3)]
+        for row in rows:
+            cols = st.columns(3)
+            for idx, fund in enumerate(row):
+                with cols[idx]:
+                    fhex = FUND_COLORS.get(fund, "#999999")
+                    fund_df = plot_df[["date", fund]].rename(columns={fund: "NAV"}).dropna()
+                    if len(fund_df) > 0:
+                        # Dynamic y-axis: scale to min/max of this fund's data
+                        y_min = fund_df["NAV"].min() * 0.95
+                        y_max = fund_df["NAV"].max() * 1.05
+                        chart = (
+                            alt.Chart(fund_df).mark_line(strokeWidth=2).encode(
+                                x=alt.X("date:T", title="Date"),
+                                y=alt.Y("NAV:Q", title=f"{fund} NAV (€)", scale=alt.Scale(domain=[y_min, y_max])),
+                                color=alt.value(fhex),
+                                tooltip=["date:T", alt.Tooltip("NAV:Q", format=",.2f")],
+                            ).properties(height=250)
+                        )
+                        st.altair_chart(chart, use_container_width=True)
+                    else:
+                        st.info(f"No data for {fund}")
+
+    # Historical Data Table with colored headers
+    st.divider()
+    st.subheader("📊 Historical Data")
+    
+    # Prepare table: selected funds with most recent dates first
+    historical_data_df = hist_df_display[["date"] + selected_funds].copy() if selected_funds else pd.DataFrame()
+    historical_data_df["date"] = pd.to_datetime(historical_data_df["date"])
+    historical_data_df = historical_data_df.sort_values("date", ascending=False).reset_index(drop=True)
+    
+    if len(historical_data_df) > 0:
+        # Format dates as YYYY-MM-DD
+        historical_data_df["date"] = historical_data_df["date"].dt.strftime("%Y-%m-%d")
+        
+        # Build CSS for colored headers based on fund colors
+        header_css = "<style>\n"
+        header_css += "table th { font-weight: 600 !important; }\n"
+        header_css += "table th:first-child { background-color: rgba(100, 100, 100, 0.3) !important; }\n"
+        for idx, fund_name in enumerate(selected_funds, start=1):
+            hex_color = FUND_COLORS.get(fund_name, "#999999")
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            header_css += f"table th:nth-child({idx+1}) {{ background-color: rgba({r}, {g}, {b}, 0.3) !important; }}\n"
+        header_css += "</style>\n"
+        st.markdown(header_css, unsafe_allow_html=True)
+        
+        # Display formatted table
+        st.dataframe(historical_data_df, use_container_width=True, hide_index=True,
+                     column_config={col: st.column_config.NumberColumn(format="€%.2f") for col in selected_funds})
+    else:
+        st.info("No historical data to display")
+
 def add_transactions_and_funds():
     global funds, transactions
     
@@ -637,6 +839,7 @@ pg = st.navigation({
     "Sbronze Menu": [
         st.Page(overview_and_charts, title="📊 Overview & Charts"),
         st.Page(transaction_history, title="📜 Transaction History"),
+        st.Page(historical_prices, title="📈 Fund NAV (History)"),
         st.Page(active_funds, title="📋 Active Funds"),
         st.Page(add_transactions_and_funds, title="➕ Add Transactions & Funds"),
     ]
