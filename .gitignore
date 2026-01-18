@@ -122,5 +122,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Streamlit
-.streamlit/
+# Streamlit (but allow config.toml for deployment)
+.streamlit/secrets.toml
+.streamlit/cache/
