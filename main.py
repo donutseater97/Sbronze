@@ -71,6 +71,8 @@ def load_historical_prices(start_date: str = "2024-01-01"):
     print(f"[INFO] Yahoo tickers: {yahoo_finance_tickers}", file=sys.stderr)
     
     fund_price_dataframes = []  # List to store each fund's price history
+    success_count = 0
+    fail_count = 0
     
     for yahoo_ticker, fund_name in yahoo_ticker_to_fund_name.items():
         try:
@@ -80,15 +82,20 @@ def load_historical_prices(start_date: str = "2024-01-01"):
             
             if price_history.empty:
                 print(f"[WARN]   ✗ {fund_name}: No data returned", file=sys.stderr)
+                fail_count += 1
                 continue
             
             price_history = price_history[["Date", "Open"]]
             price_history = price_history.rename(columns={"Open": fund_name})
             fund_price_dataframes.append(price_history)
+            success_count += 1
             print(f"[INFO]   ✓ {fund_name}: {len(price_history)} rows", file=sys.stderr)
         except Exception as e:
             print(f"[WARN]   ✗ {fund_name}: {str(e)}", file=sys.stderr)
+            fail_count += 1
             continue
+    
+    print(f"[INFO] Fetch complete: {success_count} succeeded, {fail_count} failed", file=sys.stderr)
     
     # Merge all fund price histories on 'Date'
     if fund_price_dataframes:
@@ -641,13 +648,20 @@ def historical_prices():
     
     # Refresh button
     if st.button("🔄 Refresh Data", help="Re-fetch latest data from Yahoo Finance"):
-        st.cache_data.clear()
+        with st.spinner("Clearing cache and fetching fresh data..."):
+            st.cache_data.clear()
+        st.success("Cache cleared! Refreshing data...")
         st.rerun()
     
-    hist_df = load_historical_prices()
+    with st.spinner("Loading historical price data..."):
+        hist_df = load_historical_prices()
+    
     if len(hist_df) == 0:
-        st.info("No historical data available yet")
+        st.error("⚠️ No historical data available. Click 'Refresh Data' to fetch from Yahoo Finance.")
+        st.info("If the issue persists, check if Yahoo Finance is accessible or if tickers in funds.csv are correct.")
         return
+    else:
+        st.success(f"✅ Loaded {len(hist_df)} price records")
 
     # Ensure only known funds and date
     fund_cols = [c for c in hist_df.columns if c in funds["Fund"].tolist()]
