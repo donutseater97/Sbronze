@@ -344,20 +344,37 @@ def overview_and_charts():
     if len(transactions) > 0:
         df = transactions.copy()
         df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
-        alloc = df.groupby("Fund")["invested"].sum().reset_index()
-        alloc = alloc.sort_values("invested", ascending=True)
-        st.subheader("Allocation by Fund")
-        color_scale = alt.Scale(domain=list(FUND_COLORS.keys()), range=list(FUND_COLORS.values()))
+        
+        # Allocation chart with Fund/Type toggle
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.subheader("Allocation")
+        with col2:
+            alloc_by = st.radio("Group by:", ["Fund", "Type"], horizontal=True, key="alloc_radio")
+        
+        if alloc_by == "Fund":
+            alloc = df.groupby("Fund")["invested"].sum().reset_index()
+            alloc = alloc.sort_values("invested", ascending=False)
+            color_domain = alloc["Fund"].tolist()
+            color_range = [FUND_COLORS.get(f, "#999999") for f in color_domain]
+        else:  # Type
+            alloc = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
+            alloc = alloc.groupby("Type")["invested"].sum().reset_index()
+            alloc = alloc.sort_values("invested", ascending=False)
+            alloc = alloc.rename(columns={"Type": "Fund"})
+            color_domain = alloc["Fund"].tolist()
+            color_range = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"][:len(color_domain)]
+        
+        color_scale = alt.Scale(domain=color_domain, range=color_range)
         alloc_chart = (
             alt.Chart(alloc)
-            .mark_bar()
+            .mark_arc(innerRadius=0)
             .encode(
-                x=alt.X("invested:Q", title="Invested (€)"),
-                y=alt.Y("Fund:N", sort='-x', title="Fund"),
-                color=alt.Color("Fund:N", scale=color_scale, legend=None),
-                tooltip=["Fund:N", "invested:Q"],
+                theta=alt.Theta("invested:Q"),
+                color=alt.Color("Fund:N", scale=color_scale, legend=alt.Legend(title=alloc_by)),
+                tooltip=["Fund:N", alt.Tooltip("invested:Q", format="€,.2f")],
             )
-            .properties(height=300)
+            .properties(height=400)
         )
         st.altair_chart(alloc_chart, use_container_width=True)
 
