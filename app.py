@@ -47,7 +47,7 @@ def load_data():
     if os.path.exists(TRANSACTIONS_FILE):
         transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"])
     else:
-        transactions = pd.DataFrame(columns=["Reference Period", "Date", "Fund", "Quantity", "Price (€)", "Fees (€)", "Invested (calc)", "Invested (theor)"])
+        transactions = pd.DataFrame(columns=["Date", "Fund", "Price (€)", "Quantity", "Fees (€)"])
 
     return funds, transactions
 
@@ -137,14 +137,11 @@ if page == "Add Transaction & Add Fund":
                     else:
                         fund_type = funds[funds["name"] == fund_name]["fund"].values[0]
                         new_contrib = pd.DataFrame([{
-                            "Reference Period": pd.Timestamp(contrib_date).strftime("%Y %b"),
                             "Date": contrib_date.strftime("%Y-%m-%d"),
                             "Fund": fund_type,
-                            "Quantity": quantity,
                             "Price (€)": price,
+                            "Quantity": quantity,
                             "Fees (€)": fees,
-                            "Invested (calc)": quantity * price + fees,
-                            "Invested (theor)": round((quantity * price + fees) / 10) * 10,
                         }])
                         transactions = pd.concat([transactions, new_contrib], ignore_index=True)
                         transactions.to_csv(TRANSACTIONS_FILE, index=False)
@@ -157,10 +154,18 @@ elif page == "Transaction History":
     st.header("📜 Transaction History")
     if len(transactions) > 0:
         trans_df = transactions.copy()
+        trans_df["Date"] = pd.to_datetime(trans_df["Date"], errors="coerce")
         trans_df = trans_df.sort_values("Date", ascending=False)
         
-        # Select and reorder columns
-        display_df = trans_df[["Reference Period", "Date", "Fund", "Quantity", "Price (€)", "Fees (€)", "Invested (calc)", "Invested (theor)"]].copy()
+        # Calculate derived fields
+        trans_df["Reference Period"] = trans_df["Date"].dt.strftime("%Y %b")
+        trans_df["Invested (calc)"] = trans_df["Quantity"] * trans_df["Price (€)"] + trans_df["Fees (€)"]
+        trans_df["Invested (theor)"] = (trans_df["Invested (calc)"] / 10).round() * 10
+        trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
+        
+        # Select and reorder columns for display
+        display_df = trans_df[["Reference Period", "Date_str", "Fund", "Price (€)", "Quantity", "Fees (€)", "Invested (calc)", "Invested (theor)"]].copy()
+        display_df.columns = ["Reference Period", "Date", "Fund", "Price (€)", "Quantity", "Fees (€)", "Invested (calc)", "Invested (theor)"]
         
         # Format numbers to show minimum decimals
         def format_number(x):
@@ -172,12 +177,11 @@ elif page == "Transaction History":
                 return f"{x:.10g}"
             return str(x)
         
-        display_df["Quantity"] = display_df["Quantity"].apply(format_number)
         display_df["Price (€)"] = display_df["Price (€)"].apply(format_number)
+        display_df["Quantity"] = display_df["Quantity"].apply(format_number)
         display_df["Fees (€)"] = display_df["Fees (€)"].apply(format_number)
         display_df["Invested (calc)"] = display_df["Invested (calc)"].apply(format_number)
         display_df["Invested (theor)"] = display_df["Invested (theor)"].apply(format_number)
-        display_df["Date"] = display_df["Date"].astype(str)
         
         # Add fund column for styling
         display_df["_fund_type"] = trans_df["Fund"].values
@@ -203,7 +207,7 @@ else:
     st.header("📈 Portfolio Summary")
     if len(transactions) > 0:
         df = transactions.copy()
-        df["invested"] = df["Invested (calc)"]
+        df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
         summary = df.groupby("Fund").agg(
             total_quantity=("Quantity", "sum"),
             total_invested=("invested", "sum")
@@ -219,7 +223,7 @@ else:
     st.header("📊 Charts")
     if len(transactions) > 0:
         df = transactions.copy()
-        df["invested"] = df["Invested (calc)"]
+        df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
         alloc = df.groupby("Fund")["invested"].sum().reset_index()
         alloc = alloc.sort_values("invested", ascending=True)
         st.subheader("Allocation by Fund")
