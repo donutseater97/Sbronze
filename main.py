@@ -48,67 +48,78 @@ for _, row in funds.iterrows():
     FUND_COLORS[row["Fund"]] = row["Colour"]
 
 # ---------- HISTORICAL PRICES DATA FETCHING ----------
-# Build fund mapping from funds.csv: Morningstar ID -> Yahoo Finance symbol (.F suffix)
-morningstar_id_to_fund_name = {row["Ticker"]: row["Fund"] for _, row in funds.iterrows()}
-fund_names = list(morningstar_id_to_fund_name.values())
-yahoo_finance_symbols = [f"{mid}.F" for mid in morningstar_id_to_fund_name.keys()]
-morningstar_id_to_yahoo_symbol = {mid: f"{mid}.F" for mid in morningstar_id_to_fund_name.keys()}
-fund_map = {symbol: name for symbol, name in zip(yahoo_finance_symbols, fund_names)}
+# Build mapping from funds.csv: Ticker -> Fund Name
+# Yahoo Finance requires .F suffix for Morningstar fund tickers
+ticker_to_fund_name = {row["Ticker"]: row["Fund"] for _, row in funds.iterrows()}
+fund_names = list(ticker_to_fund_name.values()) 
+yahoo_finance_tickers = [f"{ticker}.F" for ticker in ticker_to_fund_name.keys()] 
 
-def get_historical_prices_df(start_date: str = "2024-01-01", end_date: str | None = None,
-                             use_adj_close: bool = True, dropna: bool = True) -> pd.DataFrame:
-    """Return pivoted dataframe with date and fund columns using yfinance.
-
-    Columns: [date] + fund_names
-    """
-    if end_date is None:
-        end_date = datetime.now().strftime("%Y-%m-%d")
-
-    try:
-        raw = yf.download(yahoo_finance_symbols, start=start_date, end=end_date, interval="1d", progress=False)
-    except Exception:
-        # If download fails completely, return empty dataframe
-        return pd.DataFrame(columns=["date"] + fund_names)
-
-    if raw.empty or len(raw) == 0:
-        return pd.DataFrame(columns=["date"] + fund_names)
-
-    if use_adj_close and "Adj Close" in raw.columns.get_level_values(0):
-        df_close = raw["Adj Close"].rename(columns=fund_map)
-    else:
-        df_close = raw["Close"].rename(columns=fund_map)
-
-    df_close = df_close.sort_index().ffill()
-    if dropna:
-        df_close = df_close.dropna()
-
-    df_pivot = df_close.reset_index()
-    df_pivot["Date"] = pd.to_datetime(df_pivot["Date"]).dt.strftime("%Y-%m-%d")
-    df_pivot = df_pivot[["Date"] + fund_names]
-    df_pivot = df_pivot.rename(columns={"Date": "date"})
-    return df_pivot
+# Build reverse mapping: Yahoo ticker -> Fund name
+yahoo_ticker_to_fund_name = {f"{ticker}.F": fund for ticker, fund in ticker_to_fund_name.items()}
 
 @st.cache_data(ttl=3600)
-def load_historical_prices(start: str = "2024-01-01"):
-    try:
-        df = get_historical_prices_df(start_date=start)
-    except Exception:
-        # Fallback to CSV if available
-        if os.path.exists("historical_data.csv"):
-            df = pd.read_csv("historical_data.csv")
-        else:
-            df = pd.DataFrame(columns=["date"] + funds["Fund"].tolist())
-    return df
+def load_historical_prices(start_date: str = "2024-01-01"):
+    """
+    Fetch historical price data for all funds from Yahoo Finance.
+    Uses Open price and fetches each ticker individually.
+    Returns DataFrame with columns: [date, Fund1, Fund2, ...]
+    """
+    import sys
+    
+    print(f"[INFO] Fetching {len(fund_names)} funds from {start_date}", file=sys.stderr)
+    print(f"[INFO] Funds: {fund_names}", file=sys.stderr)
+    print(f"[INFO] Yahoo tickers: {yahoo_finance_tickers}", file=sys.stderr)
+    
+    fund_price_dataframes = []  # List to store each fund's price history
+    
+    for yahoo_ticker, fund_name in yahoo_ticker_to_fund_name.items():
+        try:
+            print(f"[INFO] Fetching {fund_name} ({yahoo_ticker})...", file=sys.stderr)
+            fund = yf.Ticker(yahoo_ticker)
+            price_history = fund.history(start=start_date, interval="1d").reset_index()
+            
+            if price_history.empty:
+                print(f"[WARN]   ✗ {fund_name}: No data returned", file=sys.stderr)
+                continue
+            
+            price_history = price_history[["Date", "Open"]]
+            price_history = price_history.rename(columns={"Open": fund_name})
+            fund_price_dataframes.append(price_history)
+            print(f"[INFO]   ✓ {fund_name}: {len(price_history)} rows", file=sys.stderr)
+        except Exception as e:
+            print(f"[WARN]   ✗ {fund_name}: {str(e)}", file=sys.stderr)
+            continue
+    
+    # Merge all fund price histories on 'Date'
+    if fund_price_dataframes:
+        merged_price_table = fund_price_dataframes[0]
+        for price_df in fund_price_dataframes[1:]:
+            merged_price_table = pd.merge(merged_price_table, price_df, on="Date", how="outer")
+        
+        # Format and clean
+        merged_price_table = merged_price_table.sort_values("Date")
+        merged_price_table["Date"] = pd.to_datetime(merged_price_table["Date"]).dt.strftime("%Y-%m-%d")
+        merged_price_table = merged_price_table.rename(columns={"Date": "date"})
+        
+        # Round prices to 2 decimal places
+        for col in fund_names:
+            if col in merged_price_table.columns:
+                merged_price_table[col] = merged_price_table[col].round(2)
+        
+        print(f"[INFO] Final table: {len(merged_price_table)} rows × {len(merged_price_table.columns)} columns", file=sys.stderr)
+        
+        # Save to CSV
+        try:
+            merged_price_table.to_csv("historical_data.csv", index=False)
+            print(f"[INFO] Saved to historical_data.csv", file=sys.stderr)
+        except Exception as e:
+            print(f"[WARN] Could not save CSV: {e}", file=sys.stderr)
+        
+        return merged_price_table
+    else:
+        print("[ERROR] No fund data fetched", file=sys.stderr)
+        return pd.DataFrame(columns=["date"] + fund_names)
 
-# ---------- OPTIONAL MIGRATION FROM contributions.csv ----------
-def migrate_contributions_to_transactions(funds_df):
-    # Migration no longer needed; using transaction_history.csv directly
-    return None
-
-# Run migration once if needed
-migrated = migrate_contributions_to_transactions(funds)
-if migrated is not None:
-    transactions = migrated
 
 # ---------- SIDEBAR NAVIGATION ----------
 def overview_and_charts():
@@ -887,12 +898,6 @@ pg = st.navigation({
     ]
 })
 
-# Add theme slider to sidebar
-with st.sidebar:
-
-    col1, col2 = st.columns([0.7, 0.3])
-    with col2:
-        st.session_state.theme_dark = st.toggle("🌙" if st.session_state.theme_dark else "☀️", value=st.session_state.theme_dark, key="theme_toggle_sidebar")
 
 # Custom CSS for navigation styling
 st.markdown("""
