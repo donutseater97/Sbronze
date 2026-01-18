@@ -42,7 +42,7 @@ def load_data():
     if os.path.exists(FUNDS_FILE):
         funds = pd.read_csv(FUNDS_FILE)
     else:
-        funds = pd.DataFrame(columns=["isin", "ticker", "name", "fund"])
+        funds = pd.DataFrame(columns=["isin", "ticker", "name", "fund", "type"])
 
     if os.path.exists(TRANSACTIONS_FILE):
         transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["date"])
@@ -114,8 +114,8 @@ if page == "Add Transaction & Add Fund":
             col1, col2 = st.columns(2)
             with col1:
                 isin = st.text_input("ISIN", placeholder="e.g., LU0281484963")
-                fund_type = st.selectbox(
-                    "Fund Category",
+                fund_cat = st.selectbox(
+                    "Fund",
                     ["US", "EU", "EM", "Tech", "Me A Ee", "EU HY"]
                 )
             with col2:
@@ -123,6 +123,10 @@ if page == "Add Transaction & Add Fund":
             name = st.text_input(
                 "Fund Name",
                 placeholder="e.g., JPMorgan Funds - US Select Equity Plus Fund D (acc) - EUR"
+            )
+            fund_type = st.selectbox(
+                "Type",
+                ["Equity", "Bond"]
             )
             submitted = st.form_submit_button("Add Fund")
             if submitted:
@@ -133,7 +137,8 @@ if page == "Add Transaction & Add Fund":
                         "isin": isin,
                         "ticker": ticker,
                         "name": name,
-                        "fund": fund_type,
+                        "fund": fund_cat,
+                        "type": fund_type,
                     }])
                     funds = pd.concat([funds, new_fund], ignore_index=True)
                     funds.to_csv(FUNDS_FILE, index=False)
@@ -152,7 +157,7 @@ if page == "Add Transaction & Add Fund":
             with st.form("add_Transaction"):
                 fund_name = st.selectbox("Fund", funds["name"]) 
                 contrib_date = st.date_input("Date", date.today())
-                quantity = st.number_input("Quantity", min_value=0.0)
+                quantity = st.number_input("Quantity", min_value=0.0, step=0.001, format="%f")
                 price = st.number_input("Price", min_value=0.0)
                 fees = st.number_input("Fees", min_value=0.0)
                 submitted_c = st.form_submit_button("Add Transaction")
@@ -181,24 +186,51 @@ elif page == "Transaction History":
     if len(transactions) > 0:
         trans_df = transactions.copy()
         trans_df["invested"] = trans_df["quantity"] * trans_df["price"] + trans_df["fees"]
+        trans_df["date"] = pd.to_datetime(trans_df["date"], errors="coerce")
         trans_df = trans_df.sort_values("date", ascending=False)
-        for _, row in trans_df.iterrows():
-            color = FUND_COLORS.get(row.get("fund", ""), "#000000")
-            st.markdown(
-                f"""
-                <div style="border-left: 4px solid {color}; padding: 10px; margin: 5px 0; background-color: #f9f9f9; border-radius: 4px;">
-                    <p style="color: {color}; font-weight: bold; margin: 0;">{row.get('fund_name', 'Unknown')}</p>
-                    <p style="margin: 5px 0; color: #666;">
-                        <strong>Date:</strong> {row['date']} | 
-                        <strong>Qty:</strong> {row['quantity']:.4f} | 
-                        <strong>Price:</strong> €{row['price']:.2f} | 
-                        <strong>Fees:</strong> €{row['fees']:.2f} | 
-                        <strong>Total:</strong> €{row['invested']:.2f}
-                    </p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        trans_df["Reference Period"] = trans_df["date"].dt.strftime("%Y %b")
+        trans_df["Date"] = trans_df["date"].dt.strftime("%Y-%m-%d")
+        
+        # Reorder and select columns
+        display_df = trans_df[["Reference Period", "Date", "fund_name", "quantity", "price", "fees", "invested", "fund"]].copy()
+        display_df.columns = ["Reference Period", "Date", "Fund Name", "Quantity", "Price", "Fees", "Invested", "Fund_Type"]
+        
+        # Format numbers to show minimum decimals
+        def format_number(x):
+            if pd.isna(x):
+                return ""
+            if x == int(x):
+                return str(int(x))
+            return f"{x:.10g}"
+        
+        display_df["Quantity"] = display_df["Quantity"].apply(format_number)
+        display_df["Price"] = display_df["Price"].apply(format_number)
+        display_df["Fees"] = display_df["Fees"].apply(format_number)
+        display_df["Invested"] = display_df["Invested"].apply(format_number)
+        
+        # Create color-coded HTML table
+        def hex_to_rgba(hex_color, alpha=0.15):
+            hex_color = hex_color.lstrip('#')
+            return f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, {alpha})"
+        
+        html_table = '<table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 14px;">'
+        html_table += '<thead><tr style="background-color: #f0f0f0; border-bottom: 2px solid #ddd;">'
+        for col in display_df.columns:
+            if col != "Fund_Type":
+                html_table += f'<th style="padding: 10px; text-align: left; border-right: 1px solid #ddd;">{col}</th>'
+        html_table += '</tr></thead><tbody>'
+        
+        for _, row in display_df.iterrows():
+            fund_type = row["Fund_Type"]
+            bg_color = hex_to_rgba(FUND_COLORS.get(fund_type, "#000000"))
+            html_table += f'<tr style="background-color: {bg_color}; border-bottom: 1px solid #ddd;">'
+            for col in display_df.columns:
+                if col != "Fund_Type":
+                    html_table += f'<td style="padding: 8px; border-right: 1px solid #ddd;">{row[col]}</td>'
+            html_table += '</tr>'
+        
+        html_table += '</tbody></table>'
+        st.markdown(html_table, unsafe_allow_html=True)
     else:
         st.info("No transactions yet")
 
