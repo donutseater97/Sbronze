@@ -1,4 +1,4 @@
-streamlit==1.40.1
+streamlit==1.41.0
 pandas==2.2.0
 yfinance==0.2.43
 altair==5.2.0
