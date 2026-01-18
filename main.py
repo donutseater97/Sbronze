@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 import os
-import altair as alt
+import plotly.express as px
+import plotly.graph_objects as go
 import yfinance as yf
 import warnings
 
@@ -345,56 +346,63 @@ def overview_and_charts():
         df = transactions.copy()
         df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
         
-        # Allocation chart with Fund/Type toggle
+        # Allocation chart with Fund/Type dropdown
         col1, col2 = st.columns([3, 1])
         with col1:
-            st.subheader("Allocation")
+            st.subheader("💰 Allocation")
         with col2:
-            alloc_by = st.radio("Group by:", ["Fund", "Type"], horizontal=True, key="alloc_radio")
+            alloc_by = st.selectbox("Group by:", ["Fund", "Type"], key="alloc_selectbox")
         
         if alloc_by == "Fund":
             alloc = df.groupby("Fund")["invested"].sum().reset_index()
             alloc = alloc.sort_values("invested", ascending=False)
-            color_domain = alloc["Fund"].tolist()
-            color_range = [FUND_COLORS.get(f, "#999999") for f in color_domain]
+            alloc.columns = ["Category", "Value"]
+            color_map = {cat: FUND_COLORS.get(cat, "#999999") for cat in alloc["Category"]}
         else:  # Type
             alloc = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
             alloc = alloc.groupby("Type")["invested"].sum().reset_index()
             alloc = alloc.sort_values("invested", ascending=False)
-            alloc = alloc.rename(columns={"Type": "Fund"})
-            color_domain = alloc["Fund"].tolist()
-            color_range = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"][:len(color_domain)]
+            alloc.columns = ["Category", "Value"]
+            color_map = {
+                "Bond": "#1f77b4", "Equity": "#ff7f0e", "Mixed": "#2ca02c", 
+                "Commodity": "#d62728", "Alternative": "#9467bd", "Other": "#8c564b"
+            }
         
-        color_scale = alt.Scale(domain=color_domain, range=color_range)
-        alloc_chart = (
-            alt.Chart(alloc)
-            .mark_arc(innerRadius=0)
-            .encode(
-                theta=alt.Theta("invested:Q"),
-                color=alt.Color("Fund:N", scale=color_scale, legend=alt.Legend(title=alloc_by)),
-                tooltip=["Fund:N", alt.Tooltip("invested:Q", format="€,.2f")],
-            )
-            .properties(height=400)
-        )
-        st.altair_chart(alloc_chart, use_container_width=True)
+        fig_alloc = go.Figure(data=[go.Pie(
+            labels=alloc["Category"],
+            values=alloc["Value"],
+            hole=0.4,
+            marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc["Category"]]),
+            hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
+        )])
+        fig_alloc.update_layout(height=450, showlegend=True, hovermode="closest")
+        st.plotly_chart(fig_alloc, use_container_width=True)
 
         df["date_dt"] = pd.to_datetime(df["Date"], errors="coerce")
         df = df.dropna(subset=["date_dt"])  
         if len(df) > 0:
             time_df = df.groupby("date_dt")["invested"].sum().reset_index()
             time_df = time_df.sort_values("date_dt")
-            time_df.columns = ["Date", "invested"]
-            st.subheader("Invested Over Time")
-            time_chart = (
-                alt.Chart(time_df)
-                .mark_line()
-                .encode(
-                    x=alt.X("Date:T", title="Date"),
-                    y=alt.Y("invested:Q", title="Invested (€)"),
-                    tooltip=["Date:T", "invested:Q"],
-                )
+            time_df.columns = ["Date", "Value"]
+            st.subheader("📈 Invested Over Time")
+            fig_time = go.Figure()
+            fig_time.add_trace(go.Scatter(
+                x=time_df["Date"],
+                y=time_df["Value"],
+                mode="lines+markers",
+                name="Invested",
+                line=dict(color="#667eea", width=3),
+                marker=dict(size=6),
+                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>"
+            ))
+            fig_time.update_layout(
+                hovermode="x unified",
+                height=350,
+                xaxis_title="Date",
+                yaxis_title="Invested (€)",
+                template="plotly_white"
             )
-            st.altair_chart(time_chart, use_container_width=True)
+            st.plotly_chart(fig_time, use_container_width=True)
         else:
             st.info("No valid dates for 'Invested Over Time' chart")
 
@@ -402,18 +410,23 @@ def overview_and_charts():
             df["month_date"] = df["date_dt"].dt.to_period("M").dt.to_timestamp()
             monthly = df.groupby("month_date")["invested"].sum().reset_index()
             monthly = monthly.sort_values("month_date")
-            monthly.columns = ["Month", "invested"]
-            st.subheader("Monthly Investments")
-            monthly_chart = (
-                alt.Chart(monthly)
-                .mark_bar()
-                .encode(
-                    x=alt.X("Month:T", title="Month", axis=alt.Axis(format="%Y-%m")),
-                    y=alt.Y("invested:Q", title="Invested (€)"),
-                    tooltip=["Month:T", "invested:Q"],
-                )
+            monthly.columns = ["Month", "Value"]
+            st.subheader("📅 Monthly Investments")
+            fig_monthly = go.Figure()
+            fig_monthly.add_trace(go.Bar(
+                x=monthly["Month"],
+                y=monthly["Value"],
+                marker=dict(color="#667eea"),
+                hovertemplate="<b>%{x|%B %Y}</b><br>€%{y:,.2f}<extra></extra>"
+            ))
+            fig_monthly.update_layout(
+                hovermode="x",
+                height=350,
+                xaxis_title="Month",
+                yaxis_title="Invested (€)",
+                template="plotly_white"
             )
-            st.altair_chart(monthly_chart, use_container_width=True)
+            st.plotly_chart(fig_monthly, use_container_width=True)
         else:
             st.info("No valid dates for 'Monthly Investments' chart")
     else:
