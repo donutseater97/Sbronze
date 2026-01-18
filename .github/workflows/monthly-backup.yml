@@ -1,0 +1,38 @@
+name: Monthly Data Backup
+
+on:
+  schedule:
+    # Runs on the 1st of every month at 2 AM UTC
+    - cron: '0 2 1 * *'
+  # Allow manual trigger from Actions tab
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Check for data changes
+        id: check_changes
+        run: |
+          if git diff --quiet HEAD -- "*.csv"; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Commit and push changes
+        if: always()
+        run: |
+          git config user.name "Data Backup Bot"
+          git config user.email "backup@bot.local"
+          git add transaction_history.csv funds.csv historical_prices.csv 2>/dev/null || true
+          if git diff --quiet --cached; then
+            echo "No changes to commit"
+          else
+            git commit -m "Monthly backup: $(date +%Y-%m-%d)"
+            git push
+          fi
