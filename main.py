@@ -4,6 +4,11 @@ from datetime import date, datetime
 import os
 import altair as alt
 import yfinance as yf
+import warnings
+
+# Suppress yfinance warnings about delisted tickers
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', message='.*possibly delisted.*')
 
 # ---------- AUTHENTICATION ----------
 OWNER_PASSWORD = "123"
@@ -12,8 +17,8 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 # ---------- APP SETUP ----------
-st.set_page_config(page_title="Sbronze Trasure Hunt", layout="wide")
-st.title("📊 Sbronze Trasure Hunt")
+st.set_page_config(page_title="Sbronze Treasure Hunt", layout="wide")
+st.title("📊 Sbronze Treasure Hunt")
 
 FUNDS_FILE = "funds.csv"
 TRANSACTIONS_FILE = "transaction_history.csv"
@@ -58,7 +63,14 @@ def get_historical_prices_df(start_date: str = "2024-01-01", end_date: str | Non
     if end_date is None:
         end_date = datetime.now().strftime("%Y-%m-%d")
 
-    raw = yf.download(yahoo_finance_symbols, start=start_date, end=end_date, interval="1d", progress=False)
+    try:
+        raw = yf.download(yahoo_finance_symbols, start=start_date, end=end_date, interval="1d", progress=False)
+    except Exception:
+        # If download fails completely, return empty dataframe
+        return pd.DataFrame(columns=["date"] + fund_names)
+
+    if raw.empty or len(raw) == 0:
+        return pd.DataFrame(columns=["date"] + fund_names)
 
     if use_adj_close and "Adj Close" in raw.columns.get_level_values(0):
         df_close = raw["Adj Close"].rename(columns=fund_map)
