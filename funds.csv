@@ -1,7 +1,7 @@
-ISIN,Ticker,Fund,Fund Name,Type,Colour
-LU0281484963,0P0001CRXW,US,JPMorgan Funds - Us Select Equity Plus Fund D Acc - Eur,Equity,red #C00000 ▯
-LU0261952682,0P00006DA4,EU,Fidelity Funds - Euro 50 Index Fund A-acc-eur,Equity,blue #4D93D9 ▯
-LU1321847805,0P0001722W,EM,Blackrock Strategic Funds - Emerging Markets Equity Strategies Fund E2 Eur,Equity,green #8ED973 ▯
-LU1213836080,0P00015OFP,Tech,Fidelity Funds - Global Technology Fund A-Acc-EUR,Equity,light blue #94DCF8 ▯
-LU0086177085,0P00000AV2,EU HY,Ubs (lux) Bond Fund - Euro High Yield (eur) P-acc,Bond,grey #BFBFBF ▯
-LU2539333562,0P0001QEPX,Me A Ee,JPMorgan Funds - Middle East Africa and Emerging Europe Opportunities Fund A Acc EUR,Equity,purple #9148C8 ▯
+Fund,Ticker,ISIN,Fund Name,Type,Colour
+US,0P0001CRXW,LU0281484963,JPMorgan Funds - Us Select Equity Plus Fund D Acc - Eur,Equity,#FF0000
+EU,0P00006DA4,LU0261952682,Fidelity Funds - Euro 50 Index Fund A-acc-eur,Equity,#0066FF
+EM,0P0001722W,LU1321847805,Blackrock Strategic Funds - Emerging Markets Equity Strategies Fund E2 Eur,Equity,#00FF00
+Tech,0P00015OFP,LU1213836080,Fidelity Funds - Global Technology Fund A-Acc-EUR,Equity,#999999
+EU HY,0P00000AV2,LU0086177085,Ubs (lux) Bond Fund - Euro High Yield (eur) P-acc,Bond,#00CCFF
+Me A Ee,0P0001QEPX,LU2539333562,JPMorgan Funds - Middle East Africa and Emerging Europe Opportunities Fund A Acc EUR,Equity,#CC00FF

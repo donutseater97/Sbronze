@@ -10,19 +10,9 @@ OWNER_PASSWORD = "123"
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
-if not st.session_state.authenticated:
-    pwd = st.text_input("Enter password to edit data:", type="password")
-    if pwd == OWNER_PASSWORD:
-        st.session_state.authenticated = True
-    else:
-        st.info("Viewer mode — forms are hidden")
-        st.session_state.authenticated = False
-
-IS_OWNER = st.session_state.authenticated
-
 # ---------- APP SETUP ----------
-st.set_page_config(page_title="Portfolio Tracker", layout="wide")
-st.title("📊 Portfolio Tracker")
+st.set_page_config(page_title="Sbronze Trasure Hunt", layout="wide")
+st.title("📊 Sbronze Trasure Hunt")
 
 FUNDS_FILE = "funds.csv"
 TRANSACTIONS_FILE = "transaction_history.csv"
@@ -35,7 +25,7 @@ def load_data():
     if os.path.exists(FUNDS_FILE):
         funds = pd.read_csv(FUNDS_FILE)
     else:
-        funds = pd.DataFrame(columns=["ISIN", "Ticker", "Fund", "Fund Name", "Type", "Colour"])
+        funds = pd.DataFrame(columns=["Fund", "Ticker", "ISIN", "Fund Name", "Type", "Colour"])
 
     if os.path.exists(TRANSACTIONS_FILE):
         transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"])
@@ -46,12 +36,9 @@ def load_data():
 
 funds, transactions = load_data()
 
-# Build FUND_COLORS from funds data (extract hex code from formatted string)
+# Build FUND_COLORS from funds data
 for _, row in funds.iterrows():
-    # Extract hex code from format "color name #XXXXXX ▯"
-    colour_str = row["Colour"]
-    hex_code = colour_str.split("#")[1].split()[0] if "#" in colour_str else colour_str
-    FUND_COLORS[row["Fund"]] = f"#{hex_code}"
+    FUND_COLORS[row["Fund"]] = row["Colour"]
 
 # ---------- OPTIONAL MIGRATION FROM contributions.csv ----------
 def migrate_contributions_to_transactions(funds_df):
@@ -64,159 +51,231 @@ if migrated is not None:
     transactions = migrated
 
 # ---------- SIDEBAR NAVIGATION ----------
-st.sidebar.header("Navigation")
-page = st.sidebar.radio(
-    "Go to",
-    [
-        "Portfolio Summary & Charts",
-        "Transaction History",
-        "Add Transaction & Add Fund",
-    ],
-    index=0,
-)
-
-# ---------- ADD FUND ----------
-if page == "Add Transaction & Add Fund":
-    st.header("➕ Add Fund")
-
-    if IS_OWNER:
-        with st.form("add_fund"):
-            col1, col2 = st.columns(2)
-            with col1:
-                isin = st.text_input("ISIN", placeholder="e.g., LU0281484963")
-                fund_cat = st.selectbox(
-                    "Fund",
-                    ["US", "EU", "EM", "Tech", "Me A Ee", "EU HY"]
-                )
-            with col2:
-                ticker = st.text_input("Ticker", placeholder="e.g., 0P0001CRXW")
-            name = st.text_input(
-                "Fund Name",
-                placeholder="e.g., JPMorgan Funds - US Select Equity Plus Fund D (acc) - EUR"
-            )
-            fund_type = st.selectbox(
-                "Type",
-                ["Equity", "Bond"]
-            )
-            colour = st.color_picker("Colour", value="#C00000")
-            submitted = st.form_submit_button("Add Fund")
-            if submitted:
-                if not isin.strip() or not ticker.strip() or not name.strip():
-                    st.error("All fields are required")
-                else:
-                    new_fund = pd.DataFrame([{
-                        "ISIN": isin,
-                        "Ticker": ticker,
-                        "Fund": fund_cat,
-                        "Fund Name": name,
-                        "Type": fund_type,
-                        "Colour": colour,
-                    }])
-                    funds = pd.concat([funds, new_fund], ignore_index=True)
-                    funds.to_csv(FUNDS_FILE, index=False)
-                    st.success("Fund added")
-                    st.rerun()
-    else:
-        st.info("Viewer mode (read-only)")
-
-    st.divider()
-
-    st.header("💰 Add Transaction")
-    if len(funds) == 0:
-        st.info("Add a fund first")
-    else:
-        if IS_OWNER:
-            with st.form("add_Transaction"):
-                fund_name = st.selectbox("Fund", funds["name"]) 
-                contrib_date = st.date_input("Date", date.today())
-                quantity = st.number_input("Quantity", min_value=0.0, step=0.001, format="%f")
-                price = st.number_input("Price", min_value=0.0)
-                fees = st.number_input("Fees", min_value=0.0)
-                submitted_c = st.form_submit_button("Add Transaction")
-                if submitted_c:
-                    if quantity <= 0 or price <= 0:
-                        st.error("Quantity and Price must be greater than 0")
-                    else:
-                        fund_type = funds[funds["name"] == fund_name]["fund"].values[0]
-                        new_contrib = pd.DataFrame([{
-                            "Date": contrib_date.strftime("%Y-%m-%d"),
-                            "Fund": fund_type,
-                            "Price (€)": price,
-                            "Quantity": quantity,
-                            "Fees (€)": fees,
-                        }])
-                        transactions = pd.concat([transactions, new_contrib], ignore_index=True)
-                        transactions.to_csv(TRANSACTIONS_FILE, index=False)
-                        st.success("Transaction added")
-                        st.rerun()
-        else:
-            st.info("Viewer mode (read-only)")
-
-elif page == "Transaction History":
-    st.header("📜 Transaction History")
-    if len(transactions) > 0:
-        trans_df = transactions.copy()
-        trans_df["Date"] = pd.to_datetime(trans_df["Date"], errors="coerce")
-        trans_df = trans_df.sort_values("Date", ascending=False)
-        
-        # Calculate derived fields
-        trans_df["Reference Period"] = trans_df["Date"].dt.strftime("%Y %b")
-        trans_df["Invested (calc)"] = trans_df["Quantity"] * trans_df["Price (€)"] + trans_df["Fees (€)"]
-        trans_df["Invested (theor)"] = (trans_df["Invested (calc)"] / 10).round() * 10
-        trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
-        
-        # Select and reorder columns for display
-        display_df = trans_df[["Reference Period", "Date_str", "Fund", "Price (€)", "Quantity", "Fees (€)", "Invested (calc)", "Invested (theor)"]].copy()
-        display_df.columns = ["Reference Period", "Date", "Fund", "Price (€)", "Quantity", "Fees (€)", "Invested (calc)", "Invested (theor)"]
-        
-        # Format numbers to show minimum decimals
-        def format_number(x):
-            if pd.isna(x):
-                return ""
-            if isinstance(x, (int, float)):
-                if x == int(x):
-                    return str(int(x))
-                return f"{x:.10g}"
-            return str(x)
-        
-        display_df["Price (€)"] = display_df["Price (€)"].apply(format_number)
-        display_df["Quantity"] = display_df["Quantity"].apply(format_number)
-        display_df["Fees (€)"] = display_df["Fees (€)"].apply(format_number)
-        display_df["Invested (calc)"] = display_df["Invested (calc)"].apply(format_number)
-        display_df["Invested (theor)"] = display_df["Invested (theor)"].apply(format_number)
-        
-        # Add fund column for styling
-        display_df["_fund_type"] = trans_df["Fund"].values
-        
-        # Create styled dataframe with color hue
-        def style_fund_rows(row):
-            fund_type = row["_fund_type"]
-            hex_color = FUND_COLORS.get(fund_type, "#000000")
-            # Convert hex to rgba with light alpha
-            hex_color = hex_color.lstrip('#')
-            rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
-            return ["background-color: " + rgba if col != "_fund_type" else "display: none;" for col in row.index]
-        
-        styled_df = display_df.style.apply(style_fund_rows, axis=1)
-        
-        # Display interactive dataframe with sorting and filtering
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No transactions yet")
-
-else:
+def overview_and_charts():
     # ---------- PORTFOLIO SUMMARY ----------
     st.header("📈 Portfolio Summary")
+    
+    # Fund filter buttons
+    if "portfolio_fund_filter" not in st.session_state:
+        st.session_state.portfolio_fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []
+    
+    if len(funds) > 0:
+        st.markdown("**Filter by Fund:**")
+        
+        # Generate custom CSS for fund buttons
+        fund_button_css = "<style>"
+        for fund in funds["Fund"].tolist():
+            hex_color = FUND_COLORS.get(fund, "#999999")
+            # Convert hex to rgb
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            fund_button_css += f"""
+            button[data-testid="baseButton-primary"][aria-label="{fund}"] {{
+                background-color: rgba(200, 200, 200, 0.8) !important;
+                border: none !important;
+                color: rgb({r}, {g}, {b}) !important;
+                font-weight: 600 !important;
+            }}
+            """
+        fund_button_css += "</style>"
+        st.markdown(fund_button_css, unsafe_allow_html=True)
+        
+        # Create columns for all buttons (fund buttons + reset button)
+        num_cols = len(funds["Fund"].tolist()) + 1
+        cols = st.columns(num_cols)
+        
+        for idx, fund in enumerate(funds["Fund"].tolist()):
+            with cols[idx]:
+                is_active = fund in st.session_state.portfolio_fund_filter
+                hex_color = FUND_COLORS.get(fund, "#999999")
+                if st.button(fund, key=f"portfolio_btn_{fund}", type="primary" if is_active else "secondary", use_container_width=True):
+                    if is_active:
+                        st.session_state.portfolio_fund_filter.remove(fund)
+                    else:
+                        st.session_state.portfolio_fund_filter.append(fund)
+                    st.rerun()
+        
+        # Reset button in last column
+        with cols[-1]:
+            if st.button("✕", key="reset_portfolio_filters", help="Reset filters", use_container_width=True):
+                st.session_state.portfolio_fund_filter = funds["Fund"].tolist()
+                st.rerun()
+        filter_funds = st.session_state.portfolio_fund_filter
+    else:
+        filter_funds = []
+    
     if len(transactions) > 0:
         df = transactions.copy()
-        df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
-        summary = df.groupby("Fund").agg(
-            total_quantity=("Quantity", "sum"),
-            total_invested=("invested", "sum")
-        ).reset_index()
-        summary.columns = ["fund", "total_quantity", "total_invested"]
-        st.dataframe(summary, use_container_width=True)
-        st.metric("Total Invested (€)", round(summary["total_invested"].sum(), 2))
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.dropna(subset=["Date"])
+        
+        # Apply fund filter
+        if filter_funds:
+            df = df[df["Fund"].isin(filter_funds)]
+        
+        # Calculate metrics by fund
+        summary = df.groupby("Fund").agg({
+            "Quantity": "sum",
+            "Fees (€)": "sum"
+        }).reset_index()
+        
+        # Calculate Gross Contributions
+        df["gross_contrib"] = df["Quantity"] * df["Price (€)"]
+        gross_by_fund = df.groupby("Fund")["gross_contrib"].sum()
+        summary["Gross Contributions (€)"] = summary["Fund"].map(gross_by_fund)
+        
+        # Rename and calculate Net Invested
+        summary = summary.rename(columns={"Fees (€)": "Fees (€)", "Quantity": "Quantity"})
+        summary["Net Invested (€)"] = summary["Gross Contributions (€)"] + summary["Fees (€)"]
+        
+        # Calculate Average NAV
+        summary["Average NAV (€)"] = summary["Gross Contributions (€)"] / summary["Quantity"]
+        
+        # Get latest price for each fund as proxy for current market value
+        latest_prices = df.sort_values("Date").groupby("Fund")["Price (€)"].last()
+        summary["Latest Price (€)"] = summary["Fund"].map(latest_prices)
+        summary["Market Value (€)"] = summary["Quantity"] * summary["Latest Price (€)"]
+        
+        # Calculate Total Return [€ (%)]
+        summary["Total Return (€)"] = summary["Market Value (€)"] - summary["Gross Contributions (€)"]
+        summary["Total Return (%)"] = (summary["Total Return (€)"] / summary["Gross Contributions (€)"] * 100).round(2)
+        summary["Total Return [€ (%)]"] = summary["Total Return (€)"].round(2).astype(str) + " (" + summary["Total Return (%)"].astype(str) + "%)"
+        
+        # Calculate Net Return [€ (%)]
+        summary["Net Return (€)"] = summary["Market Value (€)"] - summary["Net Invested (€)"]
+        summary["Net Return (%)"] = (summary["Net Return (€)"] / summary["Net Invested (€)"] * 100).round(2)
+        summary["Net Return [€ (%)]"] = summary["Net Return (€)"].round(2).astype(str) + " (" + summary["Net Return (%)"].astype(str) + "%)"
+        
+        # Calculate MoM performance (%)
+        # Get transactions from last 2 months for each fund
+        df["month"] = df["Date"].dt.to_period("M")
+        current_month = df["month"].max()
+        prev_month = current_month - 1
+        
+        mom_performance = {}
+        for fund in summary["Fund"]:
+            fund_df = df[df["Fund"] == fund]
+            current_month_price = fund_df[fund_df["month"] == current_month]["Price (€)"].mean()
+            prev_month_price = fund_df[fund_df["month"] == prev_month]["Price (€)"].mean()
+            if pd.notna(prev_month_price) and prev_month_price > 0 and pd.notna(current_month_price):
+                mom_performance[fund] = ((current_month_price - prev_month_price) / prev_month_price * 100)
+            else:
+                mom_performance[fund] = 0.0
+        summary["MoM performance (%)"] = summary["Fund"].map(mom_performance).round(2)
+        
+        # Calculate Weight
+        total_market_value = summary["Market Value (€)"].sum()
+        summary["Weight (Mkt Value)"] = (summary["Market Value (€)"] / total_market_value * 100).round(2)
+        
+        # Order by funds.csv order
+        fund_order = funds["Fund"].tolist()
+        summary["fund_order"] = summary["Fund"].map({f: i for i, f in enumerate(fund_order)})
+        summary = summary.sort_values("fund_order").reset_index(drop=True)
+        
+        # Select and format final columns
+        # Create display dataframe with selected columns in desired order
+        display_summary = summary[[
+            "Fund",                          # Fund identifier
+            "Gross Contributions (€)",       # Sum of all investment amounts (quantity × price)
+            "Fees (€)",                      # Total transaction fees paid
+            "Net Invested (€)",              # Gross contributions plus fees (actual cash outlay)
+            "Average NAV (€)",               # Average price per unit (gross contributions ÷ quantity)
+            "Quantity",                      # Total units/shares held
+            "Market Value (€)",              # Current portfolio value (quantity × latest price)
+            "Total Return [€ (%)]",          # Profit/loss before fees: (market value - gross contributions)
+            "Net Return [€ (%)]",            # Profit/loss after fees: (market value - net invested)
+            "MoM performance (%)",           # Month-over-month price change percentage
+            "Weight (Mkt Value)"             # Portfolio allocation: (market value ÷ total market value) × 100
+        ]].copy()
+        
+        # Rename Total Return to Return
+        display_summary = display_summary.rename(columns={"Total Return [€ (%)]": "Return [€ (%)]"})
+        
+        # Keep raw values for color logic before formatting
+        display_summary["_Total_Return_raw"] = summary["Total Return (€)"]
+        display_summary["_Net_Return_raw"] = summary["Net Return (€)"]
+        display_summary["_MoM_raw"] = summary["MoM performance (%)"]
+        
+        # Format numeric columns
+        for col in ["Gross Contributions (€)", "Fees (€)", "Net Invested (€)", "Average NAV (€)", "Market Value (€)"]:
+            display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
+        
+        display_summary["Quantity"] = display_summary["Quantity"].apply(lambda x: f"{x:,.3f}")
+        display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
+        display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(lambda x: f"{x:.2f}%")
+        
+        # Store raw values for lookup
+        raw_values = display_summary[["Fund", "_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"]].set_index("Fund")
+        
+        # Remove helper columns from display
+        display_summary = display_summary.drop(columns=["_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"])
+        
+        # Apply color coding
+        def style_fund_rows(row):
+            fund_name = row["Fund"]
+            hex_color = FUND_COLORS.get(fund_name, "#000000")
+            # Convert hex to rgba with light alpha
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
+            
+            # Get raw values for this fund
+            total_return_raw = raw_values.loc[fund_name, "_Total_Return_raw"]
+            net_return_raw = raw_values.loc[fund_name, "_Net_Return_raw"]
+            mom_raw = raw_values.loc[fund_name, "_MoM_raw"]
+            
+            styles = []
+            for col in row.index:
+                if col == "Fund":
+                    styles.append("background-color: " + rgba)
+                elif col == "Return [€ (%)]":
+                    color = "color: green;" if total_return_raw >= 0 else "color: red;"
+                    styles.append(color)
+                elif col == "Net Return [€ (%)]":
+                    color = "color: green;" if net_return_raw >= 0 else "color: red;"
+                    styles.append(color)
+                elif col == "MoM performance (%)":
+                    color = "color: green;" if mom_raw >= 0 else "color: red;"
+                    styles.append(color)
+                else:
+                    styles.append("")
+            return styles
+        
+        styled_summary = display_summary.style.apply(style_fund_rows, axis=1)
+        st.dataframe(styled_summary, use_container_width=True, hide_index=False)
+        
+        # Totals row
+        st.markdown("")
+        st.markdown("**Totals (based on filters):**")
+        total_gross = summary["Gross Contributions (€)"].sum()
+        total_fees = summary["Fees (€)"].sum()
+        total_net = summary["Net Invested (€)"].sum()
+        total_quantity = summary["Quantity"].sum()
+        total_return = summary["Total Return (€)"].sum()
+        total_net_return = summary["Net Return (€)"].sum()
+        
+        # Calculate percentages
+        total_return_pct = (total_return / total_gross * 100) if total_gross > 0 else 0
+        total_net_return_pct = (total_net_return / total_net * 100) if total_net > 0 else 0
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
+        with col2:
+            st.metric("Total Fees", f"€ {total_fees:,.2f}")
+        with col3:
+            st.metric("Total Net Invested", f"€ {total_net:,.2f}")
+        
+        col4, col5, col6 = st.columns(3)
+        with col4:
+            st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
+        with col5:
+            return_color = "normal" if total_return >= 0 else "inverse"
+            st.metric("Total Return", f"€ {total_return:,.2f} ({total_return_pct:.2f}%)", delta=None)
+        with col6:
+            net_return_color = "normal" if total_net_return >= 0 else "inverse"
+            st.metric("Total Net Return", f"€ {total_net_return:,.2f} ({total_net_return_pct:.2f}%)", delta=None)
     else:
         st.info("No transactions yet")
 
@@ -284,3 +343,366 @@ else:
     else:
         st.info("No transactions yet")
 
+def transaction_history():
+    st.header("📜 Transaction History")
+    
+    # Fund filter buttons
+    if "trans_fund_filter" not in st.session_state:
+        st.session_state.trans_fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []
+    
+    if len(funds) > 0:
+        st.markdown("**Filter by Fund:**")
+        
+        # Generate custom CSS for fund buttons
+        fund_button_css = "<style>"
+        for fund in funds["Fund"].tolist():
+            hex_color = FUND_COLORS.get(fund, "#999999")
+            # Convert hex to rgb
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            fund_button_css += f"""
+            button[data-testid="baseButton-primary"][aria-label="{fund}"] {{
+                background-color: rgba(200, 200, 200, 0.8) !important;
+                border: none !important;
+                color: rgb({r}, {g}, {b}) !important;
+                font-weight: 600 !important;
+            }}
+            """
+        fund_button_css += "</style>"
+        st.markdown(fund_button_css, unsafe_allow_html=True)
+        
+        # Create columns for all buttons (fund buttons + reset button)
+        num_cols = len(funds["Fund"].tolist()) + 1
+        cols = st.columns(num_cols)
+        
+        for idx, fund in enumerate(funds["Fund"].tolist()):
+            with cols[idx]:
+                is_active = fund in st.session_state.trans_fund_filter
+                hex_color = FUND_COLORS.get(fund, "#999999")
+                if st.button(fund, key=f"trans_btn_{fund}", type="primary" if is_active else "secondary", use_container_width=True):
+                    if is_active:
+                        st.session_state.trans_fund_filter.remove(fund)
+                    else:
+                        st.session_state.trans_fund_filter.append(fund)
+                    st.rerun()
+        
+        # Reset button in last column
+        with cols[-1]:
+            if st.button("✕", key="reset_trans_filters", help="Reset filters", use_container_width=True):
+                st.session_state.trans_fund_filter = funds["Fund"].tolist()
+                st.rerun()
+        filter_funds = st.session_state.trans_fund_filter
+    else:
+        filter_funds = []
+    
+    # Date filters
+    col1, col2 = st.columns(2)
+    with col1:
+        if len(transactions) > 0:
+            min_date = pd.to_datetime(transactions["Date"]).min().date()
+            start_date = st.date_input("Start Date:", value=min_date, key="trans_start_date")
+        else:
+            start_date = None
+    with col2:
+        if len(transactions) > 0:
+            max_date = pd.to_datetime(transactions["Date"]).max().date()
+            end_date = st.date_input("End Date:", value=max_date, key="trans_end_date")
+        else:
+            end_date = None
+    
+    if len(transactions) > 0:
+        trans_df = transactions.copy()
+        trans_df["Date"] = pd.to_datetime(trans_df["Date"], errors="coerce")
+        
+        # Apply filters
+        if filter_funds:
+            trans_df = trans_df[trans_df["Fund"].isin(filter_funds)]
+        if start_date:
+            trans_df = trans_df[trans_df["Date"] >= pd.to_datetime(start_date)]
+        if end_date:
+            trans_df = trans_df[trans_df["Date"] <= pd.to_datetime(end_date)]
+        
+        trans_df = trans_df.sort_values("Date", ascending=False)
+        
+        # Calculate derived fields
+        trans_df["Reference Period"] = trans_df["Date"].dt.strftime("%Y %b")
+        trans_df["Invested (calc)"] = trans_df["Quantity"] * trans_df["Price (€)"] + trans_df["Fees (€)"]
+        trans_df["Invested (theor)"] = (trans_df["Invested (calc)"] / 10).round() * 10
+        trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
+        
+        # Select and reorder columns for display
+        display_df = trans_df[["Reference Period", "Date_str", "Fund", "Price (€)", "Quantity", "Fees (€)", "Invested (theor)", "Invested (calc)"]].copy()
+        display_df.columns = ["Reference Period", "Date", "Fund", "Price (€)", "Quantity", "Fees (€)", "Invested (theor)", "Invested (calc)"]
+        
+        # Format numbers to show minimum decimals
+        def format_number(x):
+            if pd.isna(x):
+                return ""
+            if isinstance(x, (int, float)):
+                if x == int(x):
+                    return str(int(x))
+                return f"{x:.10g}"
+            return str(x)
+        
+        display_df["Price (€)"] = display_df["Price (€)"].apply(format_number)
+        display_df["Quantity"] = display_df["Quantity"].apply(format_number)
+        display_df["Fees (€)"] = display_df["Fees (€)"].apply(format_number)
+        display_df["Invested (calc)"] = display_df["Invested (calc)"].apply(format_number)
+        display_df["Invested (theor)"] = display_df["Invested (theor)"].apply(format_number)
+        
+        # Add fund column for styling
+        display_df["_fund_type"] = trans_df["Fund"].values
+        
+        # Create styled dataframe with color hue
+        def style_fund_rows(row):
+            fund_type = row["_fund_type"]
+            hex_color = FUND_COLORS.get(fund_type, "#000000")
+            # Convert hex to rgba with light alpha
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
+            return ["background-color: " + rgba if col != "_fund_type" else "display: none;" for col in row.index]
+        
+        styled_df = display_df.style.apply(style_fund_rows, axis=1)
+        
+        # Display interactive dataframe with sorting and filtering
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config={
+            "_fund_type": None  # Hide the column
+        })
+        
+        # Totals row
+        st.markdown("")
+        st.markdown("**Totals (based on filters):**")
+        total_fees = trans_df["Fees (€)"].sum()
+        total_invested_calc = trans_df["Invested (calc)"].sum()
+        total_invested_theor = trans_df["Invested (theor)"].sum()
+        
+        # Only show total quantity if exactly one fund is selected
+        if len(filter_funds) == 1:
+            total_quantity = trans_df["Quantity"].sum()
+            quantity_display = f"{total_quantity:,.3f}"
+        else:
+            quantity_display = "-"
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Quantity", quantity_display)
+        with col2:
+            st.metric("Total Fees", f"€ {total_fees:,.2f}")
+        with col3:
+            st.metric("Total Invested (theor)", f"€ {total_invested_theor:,.2f}")
+        with col4:
+            st.metric("Total Invested (calc)", f"€ {total_invested_calc:,.2f}")
+    else:
+        st.info("No transactions yet")
+
+def active_funds():
+    st.header("📋 Active Funds")
+    
+    if len(funds) > 0:
+        # Display funds data
+        display_funds = funds.copy()
+        
+        # Reorder columns: Fund, Ticker, ISIN, Fund Name, Type
+        display_funds = display_funds[["Fund", "Ticker", "ISIN", "Fund Name", "Type"]].copy()
+        
+        # Add fund type column for styling
+        display_funds["_fund_type"] = funds["Fund"].values
+        
+        # Apply color styling
+        def style_fund_rows(row):
+            fund_type = row["_fund_type"]
+            hex_color = FUND_COLORS.get(fund_type, "#000000")
+            if hex_color.startswith('#'):
+                hex_color = hex_color[1:]
+            rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
+            
+            styles = []
+            for col in row.index:
+                if col == "Fund":
+                    styles.append("background-color: " + rgba)
+                elif col == "_fund_type":
+                    styles.append("display: none;")
+                else:
+                    styles.append("")
+            return styles
+        
+        styled_funds = display_funds.style.apply(style_fund_rows, axis=1)
+        
+        st.dataframe(styled_funds, use_container_width=True, hide_index=True, column_config={
+            "_fund_type": None  # Hide the column
+        })
+    else:
+        st.info("No funds added yet")
+
+def add_transactions_and_funds():
+    global funds, transactions
+    
+    # ---------- AUTHENTICATION ----------
+    st.subheader("🔐 Authentication")
+    if not st.session_state.authenticated:
+        pwd = st.text_input("Enter password to edit data:", type="password")
+        if pwd == OWNER_PASSWORD:
+            st.session_state.authenticated = True
+            st.rerun()
+        elif pwd:
+            st.error("Incorrect password")
+        st.info("Enter password to add transactions and funds")
+        return
+    
+    IS_OWNER = st.session_state.authenticated
+    
+    st.header("💰 Add Transaction")
+    if len(funds) == 0:
+        st.info("Add a fund first")
+    else:
+        if IS_OWNER:
+            with st.form("add_Transaction"):
+                fund_choice = st.selectbox("Fund", funds["Fund"].tolist()) 
+                contrib_date = st.date_input("Date", date.today())
+                price = st.number_input("Price (€)", min_value=0.0)
+                quantity = st.number_input("Quantity", min_value=0.0, step=0.001, format="%f")
+                fees = st.number_input("Fees (€)", min_value=0.0)
+                submitted_c = st.form_submit_button("Add Transaction")
+                if submitted_c:
+                    if quantity <= 0 or price <= 0:
+                        st.error("Quantity and Price must be greater than 0")
+                    else:
+                        new_contrib = pd.DataFrame([{
+                            "Date": contrib_date.strftime("%Y-%m-%d"),
+                            "Fund": fund_choice,
+                            "Price (€)": price,
+                            "Quantity": quantity,
+                            "Fees (€)": fees,
+                        }])
+                        transactions = pd.concat([transactions, new_contrib], ignore_index=True)
+                        transactions.to_csv(TRANSACTIONS_FILE, index=False)
+                        st.success("Transaction added")
+                        st.rerun()
+        else:
+            st.info("Viewer mode (read-only)")
+
+    st.divider()
+
+    st.header("➕ Add Fund")
+
+    if IS_OWNER:
+        with st.form("add_fund"):
+            fund_cat = st.text_input("Fund", placeholder="e.g., US, EU, EM, Tech")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                isin = st.text_input("ISIN", placeholder="e.g., LU0281484963")
+                name = st.text_input(
+                    "Fund Name",
+                    placeholder="e.g., JPMorgan Funds - US Select Equity Plus Fund D (acc) - EUR"
+                )
+                fund_type = st.selectbox("Type", ["Equity", "Bond"])
+            with col2:
+                ticker = st.text_input("Ticker", placeholder="e.g., 0P0001CRXW")
+                colour = st.color_picker("Colour", value="#C00000")
+            
+            submitted = st.form_submit_button("Add Fund")
+            if submitted:
+                if not fund_cat.strip() or not isin.strip() or not ticker.strip() or not name.strip():
+                    st.error("All fields are required")
+                elif fund_cat in funds["Fund"].values:
+                    st.error(f"Fund '{fund_cat}' already exists")
+                elif isin in funds["ISIN"].values:
+                    st.error(f"ISIN '{isin}' already exists")
+                elif ticker in funds["Ticker"].values:
+                    st.error(f"Ticker '{ticker}' already exists")
+                else:
+                    new_fund = pd.DataFrame([{
+                        "Fund": fund_cat,
+                        "Ticker": ticker,
+                        "ISIN": isin,
+                        "Fund Name": name,
+                        "Type": fund_type,
+                        "Colour": colour,
+                    }])
+                    funds = pd.concat([funds, new_fund], ignore_index=True)
+                    funds.to_csv(FUNDS_FILE, index=False)
+                    st.success("Fund added")
+                    st.rerun()
+
+
+# Initialize theme state
+if "theme_dark" not in st.session_state:
+    st.session_state.theme_dark = True
+
+# Navigation setup
+pg = st.navigation({
+    "Sbronze Menu": [
+        st.Page(overview_and_charts, title="📊 Overview & Charts"),
+        st.Page(transaction_history, title="📜 Transaction History"),
+        st.Page(active_funds, title="📋 Active Funds"),
+        st.Page(add_transactions_and_funds, title="➕ Add Transactions & Funds"),
+    ]
+})
+
+# Add theme slider to sidebar
+with st.sidebar:
+
+    col1, col2 = st.columns([0.7, 0.3])
+    with col2:
+        st.session_state.theme_dark = st.toggle("🌙" if st.session_state.theme_dark else "☀️", value=st.session_state.theme_dark, key="theme_toggle_sidebar")
+
+# Custom CSS for navigation styling
+st.markdown("""
+<style>
+    /* Style navigation items */
+    div[data-testid="stSidebarNav"] ul {
+        padding: 0;
+    }
+    
+    div[data-testid="stSidebarNav"] li {
+        margin: 0.3rem 0;
+    }
+    
+    div[data-testid="stSidebarNav"] a {
+        padding: 0.85rem 1rem !important;
+        border-radius: 0.5rem !important;
+        color: rgba(150, 150, 150, 0.75) !important;
+        font-size: 0.95rem !important;
+        font-weight: 400 !important;
+        text-decoration: none !important;
+    }
+    
+    div[data-testid="stSidebarNav"] a:hover {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        color: rgba(180, 180, 180, 0.9) !important;
+    }
+    
+    div[data-testid="stSidebarNav"] a[aria-current="page"] {
+        background-color: rgba(255, 255, 255, 0.12) !important;
+        color: rgba(255, 255, 255, 1) !important;
+        font-size: 1.05rem !important;
+        font-weight: 700 !important;
+    }
+    
+    /* Style filter buttons with fund colors - text color will be overridden by fund-specific CSS */
+    button[kind="primary"] {
+        background-color: rgba(200, 215, 200, 0.8) !important;
+        color: rgba(30, 30, 30, 1) !important;
+        font-weight: 600 !important;
+        border: none !important;
+    }
+    
+    /* Reset button styling */
+    button[aria-label="✕"][kind="secondary"] {
+        background-color: rgba(30, 30, 30, 0.9) !important;
+        color: rgba(150, 150, 150, 0.8) !important;
+        border: none !important;
+    }
+    
+    button[kind="secondary"] {
+        background-color: rgba(40, 40, 40, 0.9) !important;
+        color: rgba(200, 50, 50, 0.5) !important;
+        border: none !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+pg.run()
