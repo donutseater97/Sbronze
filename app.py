@@ -28,21 +28,14 @@ FUNDS_FILE = "funds.csv"
 TRANSACTIONS_FILE = "transaction_history.csv"
 
 # ---------- COLOR MAPPING ----------
-FUND_COLORS = {
-    "US": "#EF553B",      # red
-    "EU": "#3A46EF",      # blue
-    "EM": "#4FC35D",      # green
-    "Tech": "#B5B5B5",    # gray
-    "Me A Ee": "#BC59F5",  # purple
-    "EU HY": "#4CC2DF"  # light blue
-}
+FUND_COLORS = {}
 
 # ---------- LOAD DATA ----------
 def load_data():
     if os.path.exists(FUNDS_FILE):
         funds = pd.read_csv(FUNDS_FILE)
     else:
-        funds = pd.DataFrame(columns=["isin", "ticker", "name", "fund", "type"])
+        funds = pd.DataFrame(columns=["ISIN", "Ticker", "Fund", "Fund Name", "Type", "Colour"])
 
     if os.path.exists(TRANSACTIONS_FILE):
         transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"])
@@ -52,6 +45,10 @@ def load_data():
     return funds, transactions
 
 funds, transactions = load_data()
+
+# Build FUND_COLORS from funds data
+for _, row in funds.iterrows():
+    FUND_COLORS[row["Fund"]] = row["Colour"]
 
 # ---------- OPTIONAL MIGRATION FROM contributions.csv ----------
 def migrate_contributions_to_transactions(funds_df):
@@ -98,17 +95,19 @@ if page == "Add Transaction & Add Fund":
                 "Type",
                 ["Equity", "Bond"]
             )
+            colour = st.color_picker("Colour", value="#C00000")
             submitted = st.form_submit_button("Add Fund")
             if submitted:
                 if not isin.strip() or not ticker.strip() or not name.strip():
                     st.error("All fields are required")
                 else:
                     new_fund = pd.DataFrame([{
-                        "isin": isin,
-                        "ticker": ticker,
-                        "name": name,
-                        "fund": fund_cat,
-                        "type": fund_type,
+                        "ISIN": isin,
+                        "Ticker": ticker,
+                        "Fund": fund_cat,
+                        "Fund Name": name,
+                        "Type": fund_type,
+                        "Colour": colour,
                     }])
                     funds = pd.concat([funds, new_fund], ignore_index=True)
                     funds.to_csv(FUNDS_FILE, index=False)

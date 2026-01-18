@@ -1,4 +1,7 @@
-isin,id,name,fund,color,ticker,type
-,,,US,red,,
-a,aa,aaa,US,blue,,
-ISIN EM,,NAME EM,EM,,TICKER EM,Equity
+ISIN,Ticker,Fund,Fund Name,Type,Colour
+LU0281484963,0P0001CRXW,US,JPMorgan Funds - Us Select Equity Plus Fund D Acc - Eur,Equity,#C00000
+LU0261952682,0P00006DA4,EU,Fidelity Funds - Euro 50 Index Fund A-acc-eur,Equity,#4D93D9
+LU1321847805,0P0001722W,EM,Blackrock Strategic Funds - Emerging Markets Equity Strategies Fund E2 Eur,Equity,#8ED973
+LU1213836080,0P00015OFP,Tech,Fidelity Funds - Global Technology Fund A-Acc-EUR,Equity,#94DCF8
+LU0086177085,0P00000AV2,EU HY,Ubs (lux) Bond Fund - Euro High Yield (eur) P-acc,Bond,#BFBFBF
+LU2539333562,0P0001QEPX,Me A Ee,JPMorgan Funds - Middle East Africa and Emerging Europe Opportunities Fund A Acc EUR,Equity,#9148C8
