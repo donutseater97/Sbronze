@@ -1,3 +1,4 @@
-isin,id,name,fund,color
-,,,US,red
-a,aa,aaa,US,blue
+isin,id,name,fund,color,ticker,type
+,,,US,red,,
+a,aa,aaa,US,blue,,
+ISIN EM,,NAME EM,EM,,TICKER EM,Equity

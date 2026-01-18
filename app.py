@@ -191,46 +191,27 @@ elif page == "Transaction History":
         trans_df["Reference Period"] = trans_df["date"].dt.strftime("%Y %b")
         trans_df["Date"] = trans_df["date"].dt.strftime("%Y-%m-%d")
         
-        # Reorder and select columns
-        display_df = trans_df[["Reference Period", "Date", "fund_name", "quantity", "price", "fees", "invested", "fund"]].copy()
-        display_df.columns = ["Reference Period", "Date", "Fund Name", "Quantity", "Price", "Fees", "Invested", "Fund_Type"]
+        # Select and reorder columns
+        display_df = trans_df[["Reference Period", "Date", "fund", "fund_name", "quantity", "price", "fees", "invested"]].copy()
+        display_df.columns = ["Reference Period", "Date", "Fund", "Fund Name", "Quantity", "Price (€)", "Fees (€)", "Invested (€)"]
         
         # Format numbers to show minimum decimals
         def format_number(x):
             if pd.isna(x):
                 return ""
-            if x == int(x):
-                return str(int(x))
-            return f"{x:.10g}"
+            if isinstance(x, (int, float)):
+                if x == int(x):
+                    return str(int(x))
+                return f"{x:.10g}"
+            return str(x)
         
         display_df["Quantity"] = display_df["Quantity"].apply(format_number)
-        display_df["Price"] = display_df["Price"].apply(format_number)
-        display_df["Fees"] = display_df["Fees"].apply(format_number)
-        display_df["Invested"] = display_df["Invested"].apply(format_number)
+        display_df["Price (€)"] = display_df["Price (€)"].apply(format_number)
+        display_df["Fees (€)"] = display_df["Fees (€)"].apply(format_number)
+        display_df["Invested (€)"] = display_df["Invested (€)"].apply(format_number)
         
-        # Create color-coded HTML table
-        def hex_to_rgba(hex_color, alpha=0.15):
-            hex_color = hex_color.lstrip('#')
-            return f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, {alpha})"
-        
-        html_table = '<table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 14px;">'
-        html_table += '<thead><tr style="background-color: #f0f0f0; border-bottom: 2px solid #ddd;">'
-        for col in display_df.columns:
-            if col != "Fund_Type":
-                html_table += f'<th style="padding: 10px; text-align: left; border-right: 1px solid #ddd;">{col}</th>'
-        html_table += '</tr></thead><tbody>'
-        
-        for _, row in display_df.iterrows():
-            fund_type = row["Fund_Type"]
-            bg_color = hex_to_rgba(FUND_COLORS.get(fund_type, "#000000"))
-            html_table += f'<tr style="background-color: {bg_color}; border-bottom: 1px solid #ddd;">'
-            for col in display_df.columns:
-                if col != "Fund_Type":
-                    html_table += f'<td style="padding: 8px; border-right: 1px solid #ddd;">{row[col]}</td>'
-            html_table += '</tr>'
-        
-        html_table += '</tbody></table>'
-        st.markdown(html_table, unsafe_allow_html=True)
+        # Display interactive dataframe with sorting and filtering
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("No transactions yet")
 
