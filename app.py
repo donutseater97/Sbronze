@@ -25,7 +25,7 @@ st.set_page_config(page_title="Portfolio Tracker", layout="wide")
 st.title("📊 Portfolio Tracker")
 
 FUNDS_FILE = "funds.csv"
-TRANSACTIONS_FILE = "transactions.csv"
+TRANSACTIONS_FILE = "transaction_history.csv"
 
 # ---------- COLOR MAPPING ----------
 FUND_COLORS = {
@@ -45,9 +45,9 @@ def load_data():
         funds = pd.DataFrame(columns=["isin", "ticker", "name", "fund", "type"])
 
     if os.path.exists(TRANSACTIONS_FILE):
-        transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["date"])
+        transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"])
     else:
-        transactions = pd.DataFrame(columns=["fund", "date", "quantity", "price", "fees"])
+        transactions = pd.DataFrame(columns=["Reference Period", "Date", "Fund", "Quantity", "Price (€)", "Fees (€)", "Invested (calc)", "Invested (theor)"])
 
     return funds, transactions
 
@@ -55,37 +55,7 @@ funds, transactions = load_data()
 
 # ---------- OPTIONAL MIGRATION FROM contributions.csv ----------
 def migrate_contributions_to_transactions(funds_df):
-    contrib_file = "contributions.csv"
-    if not os.path.exists(contrib_file):
-        return None
-    # If transactions does not exist or is empty, migrate
-    if (not os.path.exists(TRANSACTIONS_FILE)) or pd.read_csv(TRANSACTIONS_FILE).empty:
-        contribs = pd.read_csv(contrib_file, parse_dates=["date"])
-        rows = []
-        for _, r in contribs.iterrows():
-            fid = r.get("fundId")
-            fund_type = None
-            fund_name = None
-            if funds_df is not None and len(funds_df) > 0 and fid is not None:
-                if "id" in funds_df.columns:
-                    m = funds_df[funds_df["id"] == fid]
-                elif "ticker" in funds_df.columns:
-                    m = funds_df[funds_df["ticker"] == fid]
-                else:
-                    m = pd.DataFrame()
-                if len(m) > 0:
-                    fund_type = m.iloc[0].get("fund")
-                    fund_name = m.iloc[0].get("name")
-            rows.append({
-                "fund": fund_type if fund_type is not None else r.get("fund", "Unknown"),
-                "fund_name": fund_name if fund_name is not None else (str(fid) if fid is not None else "Unknown"),
-                "date": r["date"],
-                "quantity": r["quantity"],
-                "price": r["price"],
-                "fees": r["fees"],
-            })
-        pd.DataFrame(rows).to_csv(TRANSACTIONS_FILE, index=False)
-        return pd.read_csv(TRANSACTIONS_FILE, parse_dates=["date"])
+    # Migration no longer needed; using transaction_history.csv directly
     return None
 
 # Run migration once if needed
@@ -167,12 +137,14 @@ if page == "Add Transaction & Add Fund":
                     else:
                         fund_type = funds[funds["name"] == fund_name]["fund"].values[0]
                         new_contrib = pd.DataFrame([{
-                            "fund": fund_type,
-                            "fund_name": fund_name,
-                            "date": contrib_date,
-                            "quantity": quantity,
-                            "price": price,
-                            "fees": fees,
+                            "Reference Period": pd.Timestamp(contrib_date).strftime("%Y %b"),
+                            "Date": contrib_date.strftime("%Y-%m-%d"),
+                            "Fund": fund_type,
+                            "Quantity": quantity,
+                            "Price (€)": price,
+                            "Fees (€)": fees,
+                            "Invested (calc)": quantity * price + fees,
+                            "Invested (theor)": round((quantity * price + fees) / 10) * 10,
                         }])
                         transactions = pd.concat([transactions, new_contrib], ignore_index=True)
                         transactions.to_csv(TRANSACTIONS_FILE, index=False)
@@ -185,16 +157,10 @@ elif page == "Transaction History":
     st.header("📜 Transaction History")
     if len(transactions) > 0:
         trans_df = transactions.copy()
-        trans_df["invested"] = trans_df["quantity"] * trans_df["price"] + trans_df["fees"]
-        trans_df["date"] = pd.to_datetime(trans_df["date"], errors="coerce")
-        trans_df = trans_df.sort_values("date", ascending=False)
-        trans_df["Reference Period"] = trans_df["date"].dt.strftime("%Y %b")
-        trans_df["Date"] = trans_df["date"].dt.strftime("%Y-%m-%d")
-        trans_df["invested_theor"] = (trans_df["invested"] / 10).round() * 10
+        trans_df = trans_df.sort_values("Date", ascending=False)
         
         # Select and reorder columns
-        display_df = trans_df[["Reference Period", "Date", "fund", "quantity", "price", "fees", "invested", "invested_theor"]].copy()
-        display_df.columns = ["Reference Period", "Date", "Fund", "Quantity", "Price (€)", "Fees (€)", "Invested (calc)", "Invested (theor)"]
+        display_df = trans_df[["Reference Period", "Date", "Fund", "Quantity", "Price (€)", "Fees (€)", "Invested (calc)", "Invested (theor)"]].copy()
         
         # Format numbers to show minimum decimals
         def format_number(x):
@@ -211,9 +177,10 @@ elif page == "Transaction History":
         display_df["Fees (€)"] = display_df["Fees (€)"].apply(format_number)
         display_df["Invested (calc)"] = display_df["Invested (calc)"].apply(format_number)
         display_df["Invested (theor)"] = display_df["Invested (theor)"].apply(format_number)
+        display_df["Date"] = display_df["Date"].astype(str)
         
         # Add fund column for styling
-        display_df["_fund_type"] = trans_df["fund"].values
+        display_df["_fund_type"] = trans_df["Fund"].values
         
         # Create styled dataframe with color hue
         def style_fund_rows(row):
@@ -236,11 +203,12 @@ else:
     st.header("📈 Portfolio Summary")
     if len(transactions) > 0:
         df = transactions.copy()
-        df["invested"] = df["quantity"] * df["price"] + df["fees"]
-        summary = df.groupby("fund").agg(
-            total_quantity=("quantity", "sum"),
+        df["invested"] = df["Invested (calc)"]
+        summary = df.groupby("Fund").agg(
+            total_quantity=("Quantity", "sum"),
             total_invested=("invested", "sum")
         ).reset_index()
+        summary.columns = ["fund", "total_quantity", "total_invested"]
         st.dataframe(summary, use_container_width=True)
         st.metric("Total Invested (€)", round(summary["total_invested"].sum(), 2))
     else:
@@ -251,8 +219,8 @@ else:
     st.header("📊 Charts")
     if len(transactions) > 0:
         df = transactions.copy()
-        df["invested"] = df["quantity"] * df["price"] + df["fees"]
-        alloc = df.groupby("fund")["invested"].sum().reset_index()
+        df["invested"] = df["Invested (calc)"]
+        alloc = df.groupby("Fund")["invested"].sum().reset_index()
         alloc = alloc.sort_values("invested", ascending=True)
         st.subheader("Allocation by Fund")
         color_scale = alt.Scale(domain=list(FUND_COLORS.keys()), range=list(FUND_COLORS.values()))
@@ -261,27 +229,28 @@ else:
             .mark_bar()
             .encode(
                 x=alt.X("invested:Q", title="Invested (€)"),
-                y=alt.Y("fund:N", sort='-x', title="Fund"),
-                color=alt.Color("fund:N", scale=color_scale, legend=None),
-                tooltip=["fund:N", "invested:Q"],
+                y=alt.Y("Fund:N", sort='-x', title="Fund"),
+                color=alt.Color("Fund:N", scale=color_scale, legend=None),
+                tooltip=["Fund:N", "invested:Q"],
             )
             .properties(height=300)
         )
         st.altair_chart(alloc_chart, use_container_width=True)
 
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])  
+        df["date_dt"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.dropna(subset=["date_dt"])  
         if len(df) > 0:
-            time_df = df.groupby("date")["invested"].sum().reset_index()
-            time_df = time_df.sort_values("date")
+            time_df = df.groupby("date_dt")["invested"].sum().reset_index()
+            time_df = time_df.sort_values("date_dt")
+            time_df.columns = ["Date", "invested"]
             st.subheader("Invested Over Time")
             time_chart = (
                 alt.Chart(time_df)
                 .mark_line()
                 .encode(
-                    x=alt.X("date:T", title="Date"),
+                    x=alt.X("Date:T", title="Date"),
                     y=alt.Y("invested:Q", title="Invested (€)"),
-                    tooltip=["date:T", "invested:Q"],
+                    tooltip=["Date:T", "invested:Q"],
                 )
             )
             st.altair_chart(time_chart, use_container_width=True)
@@ -289,17 +258,18 @@ else:
             st.info("No valid dates for 'Invested Over Time' chart")
 
         if len(df) > 0:
-            df["month_date"] = df["date"].dt.to_period("M").dt.to_timestamp()
+            df["month_date"] = df["date_dt"].dt.to_period("M").dt.to_timestamp()
             monthly = df.groupby("month_date")["invested"].sum().reset_index()
             monthly = monthly.sort_values("month_date")
+            monthly.columns = ["Month", "invested"]
             st.subheader("Monthly Investments")
             monthly_chart = (
                 alt.Chart(monthly)
                 .mark_bar()
                 .encode(
-                    x=alt.X("month_date:T", title="Month", axis=alt.Axis(format="%Y-%m")),
+                    x=alt.X("Month:T", title="Month", axis=alt.Axis(format="%Y-%m")),
                     y=alt.Y("invested:Q", title="Invested (€)"),
-                    tooltip=["month_date:T", "invested:Q"],
+                    tooltip=["Month:T", "invested:Q"],
                 )
             )
             st.altair_chart(monthly_chart, use_container_width=True)
