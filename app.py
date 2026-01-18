@@ -46,9 +46,12 @@ def load_data():
 
 funds, transactions = load_data()
 
-# Build FUND_COLORS from funds data
+# Build FUND_COLORS from funds data (extract hex code from formatted string)
 for _, row in funds.iterrows():
-    FUND_COLORS[row["Fund"]] = row["Colour"]
+    # Extract hex code from format "color name #XXXXXX ▯"
+    colour_str = row["Colour"]
+    hex_code = colour_str.split("#")[1].split()[0] if "#" in colour_str else colour_str
+    FUND_COLORS[row["Fund"]] = f"#{hex_code}"
 
 # ---------- OPTIONAL MIGRATION FROM contributions.csv ----------
 def migrate_contributions_to_transactions(funds_df):
