@@ -212,7 +212,7 @@ elif page == "Transaction History":
         display_df["Invested (calc)"] = display_df["Invested (calc)"].apply(format_number)
         display_df["Invested (theor)"] = display_df["Invested (theor)"].apply(format_number)
         
-        # Add fund column for styling (hidden)
+        # Add fund column for styling
         display_df["_fund_type"] = trans_df["fund"].values
         
         # Create styled dataframe with color hue
@@ -222,9 +222,9 @@ elif page == "Transaction History":
             # Convert hex to rgba with light alpha
             hex_color = hex_color.lstrip('#')
             rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
-            return ["background-color: " + rgba if col != "_fund_type" else "" for col in row.index]
+            return ["background-color: " + rgba if col != "_fund_type" else "display: none;" for col in row.index]
         
-        styled_df = display_df.drop(columns=["_fund_type"]).style.apply(style_fund_rows, axis=1)
+        styled_df = display_df.style.apply(style_fund_rows, axis=1)
         
         # Display interactive dataframe with sorting and filtering
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
