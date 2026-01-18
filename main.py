@@ -124,7 +124,15 @@ def load_historical_prices(start_date: str = "2024-01-01"):
         
         return merged_price_table
     else:
-        print("[ERROR] No fund data fetched", file=sys.stderr)
+        print(f"[ERROR] No fund data fetched: {success_count} succeeded, {fail_count} failed out of {len(yahoo_ticker_to_fund_name)} total", file=sys.stderr)
+        # Store error info in session state for user feedback
+        if "st" in dir():
+            try:
+                import streamlit as st_check
+                if hasattr(st_check, 'session_state'):
+                    st_check.session_state.last_fetch_error = f"Failed to fetch data: {fail_count}/{len(yahoo_ticker_to_fund_name)} funds failed"
+            except:
+                pass
         return pd.DataFrame(columns=["date"] + fund_names)
 
 
@@ -646,22 +654,40 @@ def active_funds():
 def historical_prices():
     st.header("📈 Fund NAV (History)")
     
+    # Initialize session state for refresh
+    if "force_refresh" not in st.session_state:
+        st.session_state.force_refresh = False
+    
     # Refresh button
     if st.button("🔄 Refresh Data", help="Re-fetch latest data from Yahoo Finance"):
-        with st.spinner("Clearing cache and fetching fresh data..."):
-            st.cache_data.clear()
-        st.success("Cache cleared! Refreshing data...")
+        st.session_state.force_refresh = True
+        st.cache_data.clear()
         st.rerun()
+    
+    # Show loading message
+    if st.session_state.force_refresh:
+        st.info("🔄 Fetching fresh data from Yahoo Finance...")
+        st.session_state.force_refresh = False
     
     with st.spinner("Loading historical price data..."):
         hist_df = load_historical_prices()
     
     if len(hist_df) == 0:
-        st.error("⚠️ No historical data available. Click 'Refresh Data' to fetch from Yahoo Finance.")
-        st.info("If the issue persists, check if Yahoo Finance is accessible or if tickers in funds.csv are correct.")
+        st.error("⚠️ No historical data available.")
+        
+        # Show specific error if available
+        if "last_fetch_error" in st.session_state:
+            st.warning(f"**Last fetch status:** {st.session_state.last_fetch_error}")
+        
+        st.info("**Possible reasons:**\n- Yahoo Finance is blocking requests (rate limiting)\n- Tickers in funds.csv are incorrect or delisted\n- Network connectivity issues\n\n**To debug:**\n1. Check Streamlit Cloud logs for [INFO]/[WARN]/[ERROR] messages\n2. Verify tickers in funds.csv have '.F' suffix\n3. Try again in a few minutes if rate-limited")
+        
+        # Show funds.csv tickers for debugging
+        with st.expander("🔍 Show configured tickers"):
+            st.code(f"Tickers: {', '.join(yahoo_finance_tickers)}")
+        
         return
     else:
-        st.success(f"✅ Loaded {len(hist_df)} price records")
+        st.success(f"✅ Loaded {len(hist_df)} price records for {len(hist_df.columns)-1} funds")
 
     # Ensure only known funds and date
     fund_cols = [c for c in hist_df.columns if c in funds["Fund"].tolist()]
