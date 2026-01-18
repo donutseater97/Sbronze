@@ -902,7 +902,7 @@ st.markdown("""
     
     button[kind="secondary"] {
         background-color: rgba(40, 40, 40, 0.9) !important;
-        color: rgba(200, 50, 50, 0.5) !important;
+        color: rgba(200, 50, 50, 0.8) !important;
         border: none !important;
     }
 </style>
