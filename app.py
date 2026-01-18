@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import os
+import altair as alt
 
 # ---------- AUTHENTICATION ----------
 OWNER_PASSWORD = "123"
@@ -225,23 +226,54 @@ else:
         alloc = df.groupby("fund")["invested"].sum().reset_index()
         alloc = alloc.sort_values("invested", ascending=True)
         st.subheader("Allocation by Fund")
-        st.bar_chart(alloc.set_index("fund"))
+        color_scale = alt.Scale(domain=list(FUND_COLORS.keys()), range=list(FUND_COLORS.values()))
+        alloc_chart = (
+            alt.Chart(alloc)
+            .mark_bar()
+            .encode(
+                x=alt.X("invested:Q", title="Invested (€)"),
+                y=alt.Y("fund:N", sort='-x', title="Fund"),
+                color=alt.Color("fund:N", scale=color_scale, legend=None),
+                tooltip=["fund:N", "invested:Q"],
+            )
+            .properties(height=300)
+        )
+        st.altair_chart(alloc_chart, use_container_width=True)
 
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
         df = df.dropna(subset=["date"])  
         if len(df) > 0:
             time_df = df.groupby("date")["invested"].sum().reset_index()
-            time_df = time_df.sort_values("date").set_index("date")
+            time_df = time_df.sort_values("date")
             st.subheader("Invested Over Time")
-            st.line_chart(time_df)
+            time_chart = (
+                alt.Chart(time_df)
+                .mark_line()
+                .encode(
+                    x=alt.X("date:T", title="Date"),
+                    y=alt.Y("invested:Q", title="Invested (€)"),
+                    tooltip=["date:T", "invested:Q"],
+                )
+            )
+            st.altair_chart(time_chart, use_container_width=True)
         else:
             st.info("No valid dates for 'Invested Over Time' chart")
 
         if len(df) > 0:
-            df["month"] = df["date"].dt.to_period("M").astype(str)
-            monthly = df.groupby("month")["invested"].sum().reset_index().set_index("month")
+            df["month_date"] = df["date"].dt.to_period("M").dt.to_timestamp()
+            monthly = df.groupby("month_date")["invested"].sum().reset_index()
+            monthly = monthly.sort_values("month_date")
             st.subheader("Monthly Investments")
-            st.bar_chart(monthly)
+            monthly_chart = (
+                alt.Chart(monthly)
+                .mark_bar()
+                .encode(
+                    x=alt.X("month_date:T", title="Month", axis=alt.Axis(format="%Y-%m")),
+                    y=alt.Y("invested:Q", title="Invested (€)"),
+                    tooltip=["month_date:T", "invested:Q"],
+                )
+            )
+            st.altair_chart(monthly_chart, use_container_width=True)
         else:
             st.info("No valid dates for 'Monthly Investments' chart")
     else:
