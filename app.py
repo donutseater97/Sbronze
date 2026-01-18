@@ -190,10 +190,11 @@ elif page == "Transaction History":
         trans_df = trans_df.sort_values("date", ascending=False)
         trans_df["Reference Period"] = trans_df["date"].dt.strftime("%Y %b")
         trans_df["Date"] = trans_df["date"].dt.strftime("%Y-%m-%d")
+        trans_df["invested_theor"] = (trans_df["invested"] / 10).round() * 10
         
         # Select and reorder columns
-        display_df = trans_df[["Reference Period", "Date", "fund", "fund_name", "quantity", "price", "fees", "invested"]].copy()
-        display_df.columns = ["Reference Period", "Date", "Fund", "Fund Name", "Quantity", "Price (€)", "Fees (€)", "Invested (€)"]
+        display_df = trans_df[["Reference Period", "Date", "fund", "quantity", "price", "fees", "invested", "invested_theor"]].copy()
+        display_df.columns = ["Reference Period", "Date", "Fund", "Quantity", "Price (€)", "Fees (€)", "Invested (calc)", "Invested (theor)"]
         
         # Format numbers to show minimum decimals
         def format_number(x):
@@ -208,10 +209,25 @@ elif page == "Transaction History":
         display_df["Quantity"] = display_df["Quantity"].apply(format_number)
         display_df["Price (€)"] = display_df["Price (€)"].apply(format_number)
         display_df["Fees (€)"] = display_df["Fees (€)"].apply(format_number)
-        display_df["Invested (€)"] = display_df["Invested (€)"].apply(format_number)
+        display_df["Invested (calc)"] = display_df["Invested (calc)"].apply(format_number)
+        display_df["Invested (theor)"] = display_df["Invested (theor)"].apply(format_number)
+        
+        # Add fund column for styling (hidden)
+        display_df["_fund_type"] = trans_df["fund"].values
+        
+        # Create styled dataframe with color hue
+        def style_fund_rows(row):
+            fund_type = row["_fund_type"]
+            hex_color = FUND_COLORS.get(fund_type, "#000000")
+            # Convert hex to rgba with light alpha
+            hex_color = hex_color.lstrip('#')
+            rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
+            return ["background-color: " + rgba if col != "_fund_type" else "" for col in row.index]
+        
+        styled_df = display_df.drop(columns=["_fund_type"]).style.apply(style_fund_rows, axis=1)
         
         # Display interactive dataframe with sorting and filtering
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
     else:
         st.info("No transactions yet")
 
