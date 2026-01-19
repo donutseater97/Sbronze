@@ -1,28 +1,52 @@
 import yfinance as yf         # Import the yfinance library to get financial data
 import pandas as pd           # Import pandas for working with tables (dataframes)
-from datetime import datetime # Import datetime to get current date and time
 
-# Load tickers dynamically from funds.csv and append .F suffix
+# Load tickers dynamically from funds.csv and append .F suffix; keep mapping to Fund names
 funds = pd.read_csv("funds.csv")
-tickers = [f"{t}.F" for t in funds["Ticker"].dropna().unique()]
+fund_map = {row["Ticker"]: row["Fund"] for _, row in funds.iterrows() if pd.notna(row["Ticker"])}
+tickers = [f"{t}.F" for t in fund_map.keys()]
 
-dfs = []                      # Create an empty list to store each fund's data
-for ticker in tickers:        # Loop through each ticker symbol in the list
-    fund = yf.Ticker(ticker)
-    df = fund.history().reset_index()[["Date", "Open"]]         # Make 'Date' a column and keep only 'Date' and 'Open' price
-    # Normalize date to naive YYYY-MM-DD (drop timezone)
-    df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_localize(None)
-    df = df.rename(columns={"Open": ticker})          # Rename 'Open' column to the ticker symbol
-    dfs.append(df) 
-# Merge all dataframes on 'Date' so each ticker's prices are in separate columns
-table = dfs[0]                # Start with the first dataframe
-for df in dfs[1:]:            # Loop through the rest of the dataframes
-    table = pd.merge(table, df, on="Date", how="outer")  # Merge them together by 'Date'
+dfs = []
+for ticker in tickers:
+    try:
+        fund = yf.Ticker(ticker)
+        df = fund.history(period="max", interval="1d").reset_index()[["Date", "Open"]]
+        # Normalize date to naive and keep daily resolution
+        df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_localize(None)
+        df = df.rename(columns={"Open": ticker})
+        dfs.append(df)
+    except Exception as e:
+        print(f"WARN: failed to fetch {ticker}: {e}")
 
-# Round all numeric columns to 2 decimal places
-table.iloc[:, 1:] = table.iloc[:, 1:].round(2)
+if not dfs:
+    raise SystemExit("No data fetched; check tickers or network")
 
-# Ensure Date is string yyyy-mm-dd for downstream display
+# Merge all dataframes on Date with outer join
+table = dfs[0]
+for df in dfs[1:]:
+    table = pd.merge(table, df, on="Date", how="outer")
+
+# Sort by Date ascending
+table = table.sort_values("Date").reset_index(drop=True)
+
+# Forward-fill within each series; NaNs before first value remain NaN
+for col in table.columns:
+    if col != "Date":
+        table[col] = table[col].ffill()
+
+# Round numeric columns to 2 decimals
+num_cols = [c for c in table.columns if c != "Date"]
+table[num_cols] = table[num_cols].round(2)
+
+# Map ticker columns to Fund names (e.g., 0P0001CRXW.F -> US)
+rename_map = {}
+for ticker in fund_map.keys():
+    yahoo_col = f"{ticker}.F"
+    if yahoo_col in table.columns:
+        rename_map[yahoo_col] = fund_map[ticker]
+table = table.rename(columns=rename_map)
+
+# Ensure Date is string yyyy-mm-dd
 table["Date"] = pd.to_datetime(table["Date"]).dt.strftime("%Y-%m-%d")
 
 # Save to CSV for downstream use
