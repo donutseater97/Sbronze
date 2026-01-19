@@ -574,8 +574,9 @@ def transaction_history():
     col1, col2 = st.columns(2)
     with col1:
         if len(transactions) > 0:
-            min_date = pd.to_datetime(transactions["Date"]).min().date()
-            start_date = st.date_input("Start Date:", value=min_date, key="trans_start_date")
+            # Sort transactions to get the first registered transaction date
+            first_trans_date = pd.to_datetime(transactions["Date"]).sort_values().iloc[0].date()
+            start_date = st.date_input("Start Date:", value=first_trans_date, key="trans_start_date")
         else:
             start_date = None
     with col2:
