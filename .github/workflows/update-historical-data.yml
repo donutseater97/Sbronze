@@ -44,4 +44,5 @@ jobs:
         with:
           commit_message: 'Auto-update historical_data.csv'
           file_pattern: 'historical_data.csv'
-          token: ${{ secrets.ACTIONS_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
