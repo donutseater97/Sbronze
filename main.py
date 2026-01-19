@@ -12,10 +12,6 @@ import base64
 import requests
 import altair as alt
 
-# Suppress yfinance warnings about delisted tickers
-warnings.filterwarnings('ignore', category=FutureWarning)
-warnings.filterwarnings('ignore', message='.*possibly delisted.*')
-
 # ---------- AUTHENTICATION ----------
 OWNER_PASSWORD = "123"
 
@@ -781,13 +777,15 @@ def historical_prices():
         st.altair_chart(combined_chart, width="stretch")
     else:
         # Grid view with dynamic y-axis scaling per fund
-        show_funds = selected_funds[:6]
         if len(selected_funds) > 6:
-            st.warning("Showing first 6 funds; reduce selection for larger charts.")
-
-        rows = [show_funds[i:i+3] for i in range(0, len(show_funds), 3)]
+            cols_per_row = 2
+        else:
+            cols_per_row = min(3, len(selected_funds))
+        
+        # Create rows of charts
+        rows = [selected_funds[i:i+cols_per_row] for i in range(0, len(selected_funds), cols_per_row)]
         for row in rows:
-            cols = st.columns(3)
+            cols = st.columns(len(row))
             for idx, fund in enumerate(row):
                 with cols[idx]:
                     fhex = FUND_COLORS.get(fund, "#999999")
@@ -802,7 +800,7 @@ def historical_prices():
                                 y=alt.Y("NAV:Q", title=f"{fund} NAV (€)", scale=alt.Scale(domain=[y_min, y_max])),
                                 color=alt.value(fhex),
                                 tooltip=["date:T", alt.Tooltip("NAV:Q", format=",.2f")],
-                            ).properties(height=250)
+                            ).properties(height=300)
                         )
                         st.altair_chart(chart, width="stretch")
                     else:
