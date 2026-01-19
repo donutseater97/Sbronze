@@ -543,7 +543,7 @@ def transaction_history():
         trans_df["Gross Contribution (real)"] = trans_df["Quantity"] * trans_df["Price (€)"] + trans_df["Fees (€)"]
         trans_df["Gross Contribution (theor)"] = (trans_df["Gross Contribution (real)"] / 10).round() * 10
         trans_df["Net Invested"] = trans_df["Quantity"] * trans_df["Price (€)"]
-        trans_df["Δ Net Inv vs Exp"] = trans_df["Net Invested"] - (trans_df["Gross Contribution (real)"] - trans_df["Fees (€)"])
+        trans_df["Δ Net Inv vs Exp"] = trans_df["Net Invested"] - trans_df["Gross Contribution (theor)"] - trans_df["Fees (€)"]
         trans_df["Quantity (theor)"] = (trans_df["Gross Contribution (theor)"] - trans_df["Fees (€)"]) / trans_df["Price (€)"]
         trans_df["Δ Quantity"] = trans_df["Quantity (theor)"] - trans_df["Quantity"]
         trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
@@ -580,17 +580,31 @@ def transaction_history():
         display_df["_delta_net_inv_raw"] = trans_df["Δ Net Inv vs Exp"].values
         display_df["_delta_qty_raw"] = trans_df["Δ Quantity"].values
         
+        # Quantity formatting function: max 3 decimals, no trailing zeros
+        def format_qty(val):
+            if pd.isna(val):
+                return ""
+            # Round to 3 decimals
+            rounded = round(val, 3)
+            # Format and remove trailing zeros
+            if rounded == int(rounded):
+                return str(int(rounded))
+            return f"{rounded:.3f}".rstrip('0').rstrip('.')
+        
         # Combine Net Invested with delta
         display_df["Net Invested (Δ vs Exp)"] = display_df.apply(
             lambda row: f"{row['Net Invested']:.2f} ({row['_delta_net_inv_raw']:+.2f})" if pd.notna(row['_delta_net_inv_raw']) else f"{row['Net Invested']:.2f}",
             axis=1
         )
         
-        # Combine Quantity (theor) with delta
+        # Combine Quantity (theor) with delta - with flexible formatting
         display_df["Quantity (theor) (Δ vs Q real)"] = display_df.apply(
-            lambda row: f"{row['Quantity (theor)']:.3f} ({row['_delta_qty_raw']:+.3f})" if pd.notna(row['_delta_qty_raw']) else f"{row['Quantity (theor)']:.3f}",
+            lambda row: f"{format_qty(row['Quantity (theor)'])} ({row['_delta_qty_raw']:+.3f})" if pd.notna(row['_delta_qty_raw']) else format_qty(row['Quantity (theor)']),
             axis=1
         )
+        
+        # Format Quantity column with flexible decimals
+        display_df["Quantity"] = display_df["Quantity"].apply(format_qty)
 
         # Drop calculation columns
         display_df = display_df.drop(columns=["Net Invested", "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity"])
@@ -621,9 +635,11 @@ def transaction_history():
         # Display interactive dataframe with sorting and filtering
         st.dataframe(styled_df, width="stretch", hide_index=True, column_config={
             "Price (€)": st.column_config.NumberColumn(format="€%.2f"),
-            "Quantity": st.column_config.NumberColumn(format="%.3f"),
             "Fees (€)": st.column_config.NumberColumn(format="€%.2f"),
             "Gross Contribution (theor)": st.column_config.NumberColumn(format="€%.2f"),
+            "_delta_net_inv_raw": None,
+            "_delta_qty_raw": None,
+            "_fund_type": None,
         })
         
         # Totals row
