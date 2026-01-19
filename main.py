@@ -1032,7 +1032,7 @@ def historical_prices():
         fig_combined.update_layout(
             height=450,
             hovermode="x unified",
-            xaxis_title="Date",
+            xaxis_title="",
             yaxis_title="NAV (€)",
             template="plotly_white",
             legend_title="Fund",
@@ -1095,7 +1095,7 @@ def historical_prices():
         )
         
         # Update all axes
-        fig_grid.update_xaxes(title_text="Date")
+        fig_grid.update_xaxes(title_text="")
         fig_grid.update_yaxes(title_text="NAV (€)")
         
         st.plotly_chart(fig_grid, use_container_width=True)
