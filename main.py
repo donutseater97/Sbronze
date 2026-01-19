@@ -190,27 +190,78 @@ def overview_and_charts():
             df = df[df["Fund"].isin(filter_funds)]
         
         # Calculate metrics by fund
+        # Calculate Gross Contribution (theor) per fund
+        df["Gross Contribution (real)"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
+        df["Gross Contribution (theor)"] = (df["Gross Contribution (real)"] / 10).round() * 10
+        df["Net Invested"] = df["Quantity"] * df["Price (€)"]
+        
         summary = df.groupby("Fund").agg({
             "Quantity": "sum",
-            "Fees (€)": "sum"
+            "Fees (€)": "sum",
+            "Gross Contribution (theor)": "sum",
+            "Net Invested": "sum"
         }).reset_index()
         
-        # Calculate Gross Contributions
-        df["gross_contrib"] = df["Quantity"] * df["Price (€)"]
-        gross_by_fund = df.groupby("Fund")["gross_contrib"].sum()
-        summary["Gross Contributions (€)"] = summary["Fund"].map(gross_by_fund)
-        
-        # Rename and calculate Net Invested
-        summary = summary.rename(columns={"Fees (€)": "Fees (€)", "Quantity": "Quantity"})
-        summary["Net Invested (€)"] = summary["Gross Contributions (€)"] + summary["Fees (€)"]
+        # Rename columns
+        summary = summary.rename(columns={
+            "Gross Contribution (theor)": "Gross Contributions (€)",
+            "Net Invested": "Net Invested (€)"
+        })
+        summary["Fees (€)"] = summary["Fees (€)"]
         
         # Calculate Average NAV
         summary["Average NAV (€)"] = summary["Gross Contributions (€)"] / summary["Quantity"]
         
-        # Get latest price for each fund as proxy for current market value
-        latest_prices = df.sort_values("Date").groupby("Fund")["Price (€)"].last()
-        summary["Latest Price (€)"] = summary["Fund"].map(latest_prices)
-        summary["Market Value (€)"] = summary["Quantity"] * summary["Latest Price (€)"]
+        # Get latest price from historical data
+        hist_data = load_historical_prices()
+        
+        # Per-fund decimal precision
+        def _count_decimals(num):
+            if pd.isna(num):
+                return 0
+            s = f"{float(num):.6f}".rstrip('0').rstrip('.')
+            if '.' in s:
+                return min(len(s.split('.')[-1]), 6)
+            return 0
+        try:
+            fund_qty_decimals_overview = (
+                transactions.groupby("Fund")["Quantity"].apply(
+                    lambda s: max((_count_decimals(v) for v in s if pd.notna(v)), default=0)
+                ).to_dict()
+            )
+        except Exception:
+            fund_qty_decimals_overview = {}
+        fund_qty_decimals_overview = {f: min(int(d or 0), 3) for f, d in fund_qty_decimals_overview.items()}
+        
+        # Format Quantity with per-fund precision
+        def format_qty_overview(row):
+            dp = fund_qty_decimals_overview.get(row["Fund"], 3)
+            q = row["Quantity"]
+            rounded = round(q, dp)
+            if rounded == int(rounded):
+                return str(int(rounded))
+            return f"{rounded:.{dp}f}".rstrip('0').rstrip('.')
+        
+        summary["Quantity"] = summary.apply(format_qty_overview, axis=1)
+        
+        # Get latest price and calculate Market Value
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            latest_date = pd.to_datetime(hist_data["date"]).max()
+            latest_prices = {}
+            for fund in summary["Fund"]:
+                if fund in hist_data.columns:
+                    price_vals = hist_data[hist_data["date"] == latest_date][fund].values
+                    if len(price_vals) > 0 and pd.notna(price_vals[0]):
+                        latest_prices[fund] = price_vals[0]
+            summary["Latest Price (€)"] = summary["Fund"].map(latest_prices)
+            # Multiply rounded quantity (from display) by latest price - convert quantity back to numeric
+            summary["Market Value (€)"] = summary.apply(
+                lambda row: float(row["Quantity"].replace(',', '.')) * row["Latest Price (€)"] if pd.notna(row["Latest Price (€)"]) else 0,
+                axis=1
+            )
+        else:
+            summary["Latest Price (€)"] = 0.0
+            summary["Market Value (€)"] = 0.0
         
         # Calculate Total Return [€ (%)]
         summary["Total Return (€)"] = summary["Market Value (€)"] - summary["Gross Contributions (€)"]
@@ -273,10 +324,9 @@ def overview_and_charts():
         display_summary["_MoM_raw"] = summary["MoM performance (%)"]
         
         # Format numeric columns
-        for col in ["Gross Contributions (€)", "Fees (€)", "Net Invested (€)", "Average NAV (€)", "Market Value (€)"]:
+        for col in ["Gross Contributions (€)", "Fees (€)", "Net Invested (€)", "Average NAV (€)", "Latest Price (€)", "Market Value (€)"]:
             display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
         
-        display_summary["Quantity"] = display_summary["Quantity"].apply(lambda x: f"{x:,.3f}")
         display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
         display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(lambda x: f"{x:.2f}%")
         
@@ -305,14 +355,14 @@ def overview_and_charts():
                 if col == "Fund":
                     styles.append("background-color: " + rgba)
                 elif col == "Return [€ (%)]":
-                    color = "color: green;" if total_return_raw >= 0 else "color: red;"
-                    styles.append(color)
+                    bg_color = "background-color: rgba(46, 160, 67, 0.15);" if total_return_raw >= 0 else "background-color: rgba(248, 81, 73, 0.15);"
+                    styles.append(bg_color)
                 elif col == "Net Return [€ (%)]":
-                    color = "color: green;" if net_return_raw >= 0 else "color: red;"
-                    styles.append(color)
+                    bg_color = "background-color: rgba(46, 160, 67, 0.15);" if net_return_raw >= 0 else "background-color: rgba(248, 81, 73, 0.15);"
+                    styles.append(bg_color)
                 elif col == "MoM performance (%)":
-                    color = "color: green;" if mom_raw >= 0 else "color: red;"
-                    styles.append(color)
+                    bg_color = "background-color: rgba(46, 160, 67, 0.15);" if mom_raw >= 0 else "background-color: rgba(248, 81, 73, 0.15);"
+                    styles.append(bg_color)
                 else:
                     styles.append("")
             return styles
@@ -333,31 +383,37 @@ def overview_and_charts():
         # Calculate percentages
         total_return_pct = (total_return / total_gross * 100) if total_gross > 0 else 0
         total_net_return_pct = (total_net_return / total_net * 100) if total_net > 0 else 0
+        total_fees_pct = (total_fees / total_gross * 100) if total_gross > 0 else 0
         
-        # Totals order: Net Return, Market Value, Fees, Return, Gross Contributions, Net Invested
+        # Totals order: Return, Net Return, Fees, Gross Contributions, Market Value, Net Invested
         row1_col1, row1_col2, row1_col3 = st.columns(3)
         with row1_col1:
             st.metric(
-                "Total Net Return",
-                f"€ {total_net_return:,.2f}",
-                delta=total_net_return_pct,
+                "Total Return",
+                f"€ {total_return:,.2f}",
+                delta=f"{total_return_pct:+.2f}%",
                 delta_color="normal",
             )
         with row1_col2:
-            st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
+            st.metric(
+                "Total Net Return",
+                f"€ {total_net_return:,.2f}",
+                delta=f"{total_net_return_pct:+.2f}%",
+                delta_color="normal",
+            )
         with row1_col3:
-            st.metric("Total Fees", f"€ {total_fees:,.2f}")
+            st.metric(
+                "Total Fees",
+                f"€ {total_fees:,.2f}",
+                delta=f"{total_fees_pct:+.2f}%",
+                delta_color="normal",
+            )
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
-            st.metric(
-                "Total Return",
-                f"€ {total_return:,.2f}",
-                delta=total_return_pct,
-                delta_color="normal",
-            )
-        with row2_col2:
             st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
+        with row2_col2:
+            st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
         with row2_col3:
             st.metric("Total Net Invested", f"€ {total_net:,.2f}")
     else:
@@ -706,6 +762,13 @@ def transaction_history():
             "_fund_type": None,
         })
         
+        # CSS for smaller (Now...) text
+        st.markdown("""
+        <style>
+        [data-testid="stMetric"] small { font-size: 0.5em !important; opacity: 0.7; }
+        </style>
+        """, unsafe_allow_html=True)
+        
         # Totals row
         st.markdown("")
         st.markdown("**Totals (based on filters):**")
@@ -713,6 +776,9 @@ def transaction_history():
         total_gross_theor = trans_df["Gross Contribution (theor)"].sum()
         total_net_invested = trans_df["Net Invested"].sum()
         total_fees = trans_df["Fees (€)"].sum()
+
+        # Calculate fees percentage
+        fees_pct = (total_fees / total_gross_theor * 100) if total_gross_theor > 0 else 0.0
 
         # P/L Price approx: sum of delta vs exp
         pl_price_approx = trans_df["Δ Net Inv vs Exp"].sum()
@@ -766,7 +832,7 @@ def transaction_history():
         with row1_col2:
             st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
         with row1_col3:
-            st.metric("Fees", f"€ {total_fees:,.2f}")
+            st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"+{fees_pct:.2f}%")
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
