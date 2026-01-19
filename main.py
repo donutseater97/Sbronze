@@ -680,6 +680,22 @@ def historical_prices():
         return
     else:
         st.success(f"✅ Loaded {len(hist_df)} price records for {len(hist_df.columns)-1} funds")
+        # Show last updated banner (data max date + file timestamp)
+        try:
+            max_date = pd.to_datetime(hist_df.get("date"), errors="coerce").max()
+            file_ts_str = None
+            if os.path.exists("historical_data.csv"):
+                ts = os.path.getmtime("historical_data.csv")
+                file_ts_str = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M UTC")
+            parts = []
+            if pd.notna(max_date):
+                parts.append(f"Last data date: {max_date.strftime('%Y-%m-%d')}")
+            if file_ts_str:
+                parts.append(f"File updated: {file_ts_str}")
+            if parts:
+                st.caption(" • ".join(parts) + " • Source: cached CSV (GitHub Actions)")
+        except Exception:
+            pass
 
     # Ensure only known funds and date
     fund_cols = [c for c in hist_df.columns if c in funds["Fund"].tolist()]
