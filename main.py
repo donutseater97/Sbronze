@@ -721,29 +721,34 @@ def transaction_history():
         hist_data = load_historical_prices()
         latest_date_str = "-"
         pl_qty_approx = 0.0
+        pl_qty_approx_now = 0.0
 
         if len(hist_data) > 0 and "date" in hist_data.columns:
             # Get latest date from historical data
             latest_date = pd.to_datetime(hist_data["date"]).max()
             latest_date_str = latest_date.strftime("%Y-%m-%d") if pd.notna(latest_date) else "-"
 
-            # For each transaction: delta_qty * latest_price - delta_qty * row_price
+            # For each transaction: delta_qty * row_price and delta_qty * latest_price
             for _, row in trans_df.iterrows():
                 fund = row["Fund"]
                 delta_qty_raw = row["Δ Quantity"]
                 row_price = row["Price (€)"]
-
+                
                 # Use displayed precision for delta qty (per fund)
                 dp = fund_qty_decimals.get(fund, 3)
                 delta_qty = round(delta_qty_raw, dp) if pd.notna(delta_qty_raw) else None
                 if delta_qty is not None and abs(delta_qty) < 10 ** (-dp):
                     delta_qty = 0.0
 
-                if pd.notna(delta_qty) and fund in hist_data.columns:
-                    # Get latest price for this fund
-                    latest_price = hist_data[hist_data["date"] == latest_date][fund].values
-                    if len(latest_price) > 0 and pd.notna(latest_price[0]):
-                        pl_qty_approx += delta_qty * latest_price[0] - delta_qty * row_price
+                if pd.notna(delta_qty):
+                    # Main calculation: delta_qty * row_price
+                    pl_qty_approx += delta_qty * row_price
+                    
+                    # Now calculation: delta_qty * latest_price
+                    if fund in hist_data.columns:
+                        latest_price = hist_data[hist_data["date"] == latest_date][fund].values
+                        if len(latest_price) > 0 and pd.notna(latest_price[0]):
+                            pl_qty_approx_now += delta_qty * latest_price[0]
 
         # Avg NAV (only when one fund selected)
         if len(filter_funds) == 1:
@@ -767,7 +772,8 @@ def transaction_history():
         with row2_col1:
             st.metric("P/L Price approx.", f"€ {pl_price_approx:+,.2f}")
         with row2_col2:
-            st.metric(f"P/L Quantity approx. (as of {latest_date_str})", f"€ {pl_qty_approx:+,.2f}")
+            pl_qty_display = f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})" if latest_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
+            st.metric(f"P/L Quantity approx. (as of {latest_date_str})", pl_qty_display)
         with row2_col3:
             st.metric("Avg NAV", avg_nav_display if avg_nav_display else "-")
     else:
