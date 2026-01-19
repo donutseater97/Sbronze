@@ -35,6 +35,11 @@ jobs:
         run: |
           python get_historical_data.py
 
+      - name: Ensure clean working tree
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+
       - name: Pull latest changes
         run: |
           git pull --rebase origin main
