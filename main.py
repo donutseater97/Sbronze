@@ -671,64 +671,63 @@ def transaction_history():
         # Totals row
         st.markdown("")
         st.markdown("**Totals (based on filters):**")
-        
-            # Calculate totals
-            total_gross_theor = trans_df["Gross Contribution (theor)"].sum()
-            total_net_invested = trans_df["Net Invested"].sum()
-            total_fees = trans_df["Fees (€)"].sum()
-        
-            # P/L Price approx: sum of delta vs exp
-            pl_price_approx = trans_df["Δ Net Inv vs Exp"].sum()
-        
-            # P/L Quantity approx: requires historical data
-            hist_data = load_historical_prices()
-            latest_date_str = "-"
-            pl_qty_approx = 0.0
-        
-            if len(hist_data) > 0 and "date" in hist_data.columns:
-                # Get latest date from historical data
-                latest_date = pd.to_datetime(hist_data["date"]).max()
-                latest_date_str = latest_date.strftime("%Y-%m-%d") if pd.notna(latest_date) else "-"
-            
-                # For each transaction: delta_qty * latest_price - delta_qty * row_price
-                for _, row in trans_df.iterrows():
-                    fund = row["Fund"]
-                    delta_qty = row["Δ Quantity"]
-                    row_price = row["Price (€)"]
-                
-                    if pd.notna(delta_qty) and fund in hist_data.columns:
-                        # Get latest price for this fund
-                        latest_price = hist_data[hist_data["date"] == latest_date][fund].values
-                        if len(latest_price) > 0 and pd.notna(latest_price[0]):
-                            pl_qty_approx += delta_qty * latest_price[0] - delta_qty * row_price
-        
-            # Avg NAV (only when one fund selected)
-            if len(filter_funds) == 1:
-                total_quantity = trans_df["Quantity"].sum()
-                total_gross_contrib = (trans_df["Quantity"] * trans_df["Price (€)"]).sum()
-                avg_nav = total_gross_contrib / total_quantity if total_quantity > 0 else 0
-                avg_nav_display = f"€ {avg_nav:,.2f}"
-            else:
-                avg_nav_display = "-"
-        
-            # Display totals in 2 rows x 3 columns
-            row1_col1, row1_col2, row1_col3 = st.columns(3)
-            with row1_col1:
-                st.metric("Total Gross Contribution (theor)", f"€ {total_gross_theor:,.2f}")
-            with row1_col2:
-                st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
-            with row1_col3:
-                st.metric("Fees", f"€ {total_fees:,.2f}")
-        
-            row2_col1, row2_col2, row2_col3 = st.columns(3)
-            with row2_col1:
-                delta_color = "normal" if pl_price_approx >= 0 else "inverse"
-                st.metric("P/L Price approx.", f"€ {pl_price_approx:,.2f}", delta=pl_price_approx, delta_color=delta_color)
-            with row2_col2:
-                delta_color_qty = "normal" if pl_qty_approx >= 0 else "inverse"
-                st.metric(f"P/L Quantity approx. (as of {latest_date_str})", f"€ {pl_qty_approx:,.2f}", delta=pl_qty_approx, delta_color=delta_color_qty)
-            with row2_col3:
-                st.metric("Avg NAV", avg_nav_display)
+        # Calculate totals
+        total_gross_theor = trans_df["Gross Contribution (theor)"].sum()
+        total_net_invested = trans_df["Net Invested"].sum()
+        total_fees = trans_df["Fees (€)"].sum()
+
+        # P/L Price approx: sum of delta vs exp
+        pl_price_approx = trans_df["Δ Net Inv vs Exp"].sum()
+
+        # P/L Quantity approx: requires historical data
+        hist_data = load_historical_prices()
+        latest_date_str = "-"
+        pl_qty_approx = 0.0
+
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            # Get latest date from historical data
+            latest_date = pd.to_datetime(hist_data["date"]).max()
+            latest_date_str = latest_date.strftime("%Y-%m-%d") if pd.notna(latest_date) else "-"
+
+            # For each transaction: delta_qty * latest_price - delta_qty * row_price
+            for _, row in trans_df.iterrows():
+                fund = row["Fund"]
+                delta_qty = row["Δ Quantity"]
+                row_price = row["Price (€)"]
+
+                if pd.notna(delta_qty) and fund in hist_data.columns:
+                    # Get latest price for this fund
+                    latest_price = hist_data[hist_data["date"] == latest_date][fund].values
+                    if len(latest_price) > 0 and pd.notna(latest_price[0]):
+                        pl_qty_approx += delta_qty * latest_price[0] - delta_qty * row_price
+
+        # Avg NAV (only when one fund selected)
+        if len(filter_funds) == 1:
+            total_quantity = trans_df["Quantity"].sum()
+            total_gross_contrib = (trans_df["Quantity"] * trans_df["Price (€)"]).sum()
+            avg_nav = total_gross_contrib / total_quantity if total_quantity > 0 else 0
+            avg_nav_display = f"€ {avg_nav:,.2f}"
+        else:
+            avg_nav_display = "-"
+
+        # Display totals in 2 rows x 3 columns
+        row1_col1, row1_col2, row1_col3 = st.columns(3)
+        with row1_col1:
+            st.metric("Total Gross Contribution (theor)", f"€ {total_gross_theor:,.2f}")
+        with row1_col2:
+            st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
+        with row1_col3:
+            st.metric("Fees", f"€ {total_fees:,.2f}")
+
+        row2_col1, row2_col2, row2_col3 = st.columns(3)
+        with row2_col1:
+            delta_color = "normal" if pl_price_approx >= 0 else "inverse"
+            st.metric("P/L Price approx.", f"€ {pl_price_approx:,.2f}", delta=pl_price_approx, delta_color=delta_color)
+        with row2_col2:
+            delta_color_qty = "normal" if pl_qty_approx >= 0 else "inverse"
+            st.metric(f"P/L Quantity approx. (as of {latest_date_str})", f"€ {pl_qty_approx:,.2f}", delta=pl_qty_approx, delta_color=delta_color_qty)
+        with row2_col3:
+            st.metric("Avg NAV", avg_nav_display)
     else:
         st.info("No transactions yet")
 
