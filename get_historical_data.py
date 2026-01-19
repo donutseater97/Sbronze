@@ -2,9 +2,9 @@ import yfinance as yf         # Import the yfinance library to get financial dat
 import pandas as pd           # Import pandas for working with tables (dataframes)
 from datetime import datetime # Import datetime to get current date and time
 
-tickers = [     
-    "0P0001QEPX.F"   
-]
+# Load tickers dynamically from funds.csv and append .F suffix
+funds = pd.read_csv("funds.csv")
+tickers = [f"{t}.F" for t in funds["Ticker"].dropna().unique()]
 
 dfs = []                      # Create an empty list to store each fund's data
 for ticker in tickers:        # Loop through each ticker symbol in the list
@@ -20,4 +20,6 @@ for df in dfs[1:]:            # Loop through the rest of the dataframes
 # Round all numeric columns to 2 decimal places
 table.iloc[:, 1:] = table.iloc[:, 1:].round(2)
 
-print(table)                  # Print the final table to the terminal
+# Save to CSV for downstream use
+table.to_csv("historical_data.csv", index=False)
+print("Saved historical_data.csv with", len(table), "rows and", len(table.columns), "columns")

@@ -6,6 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import yfinance as yf
 import warnings
+import subprocess
 
 # Suppress yfinance warnings about delisted tickers
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -47,93 +48,44 @@ funds, transactions = load_data()
 for _, row in funds.iterrows():
     FUND_COLORS[row["Fund"]] = row["Colour"]
 
+# Build Yahoo Finance tickers list (ticker + .F)
+yahoo_tickers = [f"{t}.F" for t in funds["Ticker"].dropna().unique()]
+
 # ---------- HISTORICAL PRICES DATA FETCHING ----------
-# Build mapping from funds.csv: Ticker -> Fund Name
-# Yahoo Finance requires .F suffix for Morningstar fund tickers
-ticker_to_fund_name = {row["Ticker"]: row["Fund"] for _, row in funds.iterrows()}
-fund_names = list(ticker_to_fund_name.values()) 
-yahoo_finance_tickers = [f"{ticker}.F" for ticker in ticker_to_fund_name.keys()] 
 
-# Build reverse mapping: Yahoo ticker -> Fund name
-yahoo_ticker_to_fund_name = {f"{ticker}.F": fund for ticker, fund in ticker_to_fund_name.items()}
+def load_historical_prices():
+    """Run helper script to refresh historical_data.csv, then load it."""
+    try:
+        subprocess.run(["python", "get_historical_data.py"], check=True)
+    except Exception as exc:  # pragma: no cover - UI surface
+        st.error(f"Failed to refresh historical data: {exc}")
+        return pd.DataFrame()
 
-@st.cache_data(ttl=3600)
-def load_historical_prices(start_date: str = "2024-01-01"):
-    """
-    Fetch historical price data for all funds from Yahoo Finance.
-    Uses Open price and fetches each ticker individually.
-    Returns DataFrame with columns: [date, Fund1, Fund2, ...]
-    """
-    import sys
-    
-    print(f"[INFO] Fetching {len(fund_names)} funds from {start_date}", file=sys.stderr)
-    print(f"[INFO] Funds: {fund_names}", file=sys.stderr)
-    print(f"[INFO] Yahoo tickers: {yahoo_finance_tickers}", file=sys.stderr)
-    
-    fund_price_dataframes = []  # List to store each fund's price history
-    success_count = 0
-    fail_count = 0
-    
-    for yahoo_ticker, fund_name in yahoo_ticker_to_fund_name.items():
-        try:
-            print(f"[INFO] Fetching {fund_name} ({yahoo_ticker})...", file=sys.stderr)
-            fund = yf.Ticker(yahoo_ticker)
-            price_history = fund.history(start=start_date, interval="1d").reset_index()
-            
-            if price_history.empty:
-                print(f"[WARN]   ✗ {fund_name}: No data returned", file=sys.stderr)
-                fail_count += 1
-                continue
-            
-            price_history = price_history[["Date", "Open"]]
-            price_history = price_history.rename(columns={"Open": fund_name})
-            fund_price_dataframes.append(price_history)
-            success_count += 1
-            print(f"[INFO]   ✓ {fund_name}: {len(price_history)} rows", file=sys.stderr)
-        except Exception as e:
-            print(f"[WARN]   ✗ {fund_name}: {str(e)}", file=sys.stderr)
-            fail_count += 1
-            continue
-    
-    print(f"[INFO] Fetch complete: {success_count} succeeded, {fail_count} failed", file=sys.stderr)
-    
-    # Merge all fund price histories on 'Date'
-    if fund_price_dataframes:
-        merged_price_table = fund_price_dataframes[0]
-        for price_df in fund_price_dataframes[1:]:
-            merged_price_table = pd.merge(merged_price_table, price_df, on="Date", how="outer")
-        
-        # Format and clean
-        merged_price_table = merged_price_table.sort_values("Date")
-        merged_price_table["Date"] = pd.to_datetime(merged_price_table["Date"]).dt.strftime("%Y-%m-%d")
-        merged_price_table = merged_price_table.rename(columns={"Date": "date"})
-        
-        # Round prices to 2 decimal places
-        for col in fund_names:
-            if col in merged_price_table.columns:
-                merged_price_table[col] = merged_price_table[col].round(2)
-        
-        print(f"[INFO] Final table: {len(merged_price_table)} rows × {len(merged_price_table.columns)} columns", file=sys.stderr)
-        
-        # Save to CSV
-        try:
-            merged_price_table.to_csv("historical_data.csv", index=False)
-            print(f"[INFO] Saved to historical_data.csv", file=sys.stderr)
-        except Exception as e:
-            print(f"[WARN] Could not save CSV: {e}", file=sys.stderr)
-        
-        return merged_price_table
-    else:
-        print(f"[ERROR] No fund data fetched: {success_count} succeeded, {fail_count} failed out of {len(yahoo_ticker_to_fund_name)} total", file=sys.stderr)
-        # Store error info in session state for user feedback
-        if "st" in dir():
-            try:
-                import streamlit as st_check
-                if hasattr(st_check, 'session_state'):
-                    st_check.session_state.last_fetch_error = f"Failed to fetch data: {fail_count}/{len(yahoo_ticker_to_fund_name)} funds failed"
-            except:
-                pass
-        return pd.DataFrame(columns=["date"] + fund_names)
+    if not os.path.exists("historical_data.csv"):
+        st.error("historical_data.csv not found after refresh")
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv("historical_data.csv")
+    except Exception as exc:  # pragma: no cover
+        st.error(f"Could not read historical_data.csv: {exc}")
+        return pd.DataFrame()
+
+    # Normalize column names for UI
+    if "Date" in df.columns:
+        df = df.rename(columns={"Date": "date"})
+
+    # Map ticker columns to fund names (e.g., 0P0001CRXW.F -> US)
+    for _, row in funds.iterrows():
+        ticker = row["Ticker"]
+        fund_name = row["Fund"]
+        yahoo_col = f"{ticker}.F"
+        if yahoo_col in df.columns:
+            df = df.rename(columns={yahoo_col: fund_name})
+
+    return df
+
+
 
 
 # ---------- SIDEBAR NAVIGATION ----------
@@ -683,7 +635,7 @@ def historical_prices():
         
         # Show funds.csv tickers for debugging
         with st.expander("🔍 Show configured tickers"):
-            st.code(f"Tickers: {', '.join(yahoo_finance_tickers)}")
+            st.code(f"Tickers: {', '.join(yahoo_tickers)}")
         
         return
     else:
