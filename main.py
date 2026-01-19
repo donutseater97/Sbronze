@@ -10,6 +10,7 @@ import subprocess
 import sys
 import base64
 import requests
+import altair as alt
 
 # Suppress yfinance warnings about delisted tickers
 warnings.filterwarnings('ignore', category=FutureWarning)
