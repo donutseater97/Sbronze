@@ -334,23 +334,32 @@ def overview_and_charts():
         total_return_pct = (total_return / total_gross * 100) if total_gross > 0 else 0
         total_net_return_pct = (total_net_return / total_net * 100) if total_net > 0 else 0
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
-        with col2:
-            st.metric("Total Fees", f"€ {total_fees:,.2f}")
-        with col3:
-            st.metric("Total Net Invested", f"€ {total_net:,.2f}")
-        
-        col4, col5, col6 = st.columns(3)
-        with col4:
+        # Totals order: Net Return, Market Value, Fees, Return, Gross Contributions, Net Invested
+        row1_col1, row1_col2, row1_col3 = st.columns(3)
+        with row1_col1:
+            st.metric(
+                "Total Net Return",
+                f"€ {total_net_return:,.2f}",
+                delta=total_net_return_pct,
+                delta_color="normal",
+            )
+        with row1_col2:
             st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
-        with col5:
-            return_color = "normal" if total_return >= 0 else "inverse"
-            st.metric("Total Return", f"€ {total_return:,.2f} ({total_return_pct:.2f}%)", delta=None)
-        with col6:
-            net_return_color = "normal" if total_net_return >= 0 else "inverse"
-            st.metric("Total Net Return", f"€ {total_net_return:,.2f} ({total_net_return_pct:.2f}%)", delta=None)
+        with row1_col3:
+            st.metric("Total Fees", f"€ {total_fees:,.2f}")
+
+        row2_col1, row2_col2, row2_col3 = st.columns(3)
+        with row2_col1:
+            st.metric(
+                "Total Return",
+                f"€ {total_return:,.2f}",
+                delta=total_return_pct,
+                delta_color="normal",
+            )
+        with row2_col2:
+            st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
+        with row2_col3:
+            st.metric("Total Net Invested", f"€ {total_net:,.2f}")
     else:
         st.info("No transactions yet")
 
