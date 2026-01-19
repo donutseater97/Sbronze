@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import yfinance as yf
 import warnings
 import subprocess
+import sys
 
 # Suppress yfinance warnings about delisted tickers
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -56,7 +57,19 @@ yahoo_tickers = [f"{t}.F" for t in funds["Ticker"].dropna().unique()]
 def load_historical_prices():
     """Run helper script to refresh historical_data.csv, then load it."""
     try:
-        subprocess.run(["python", "get_historical_data.py"], check=True)
+        proc = subprocess.run(
+            [sys.executable, "get_historical_data.py"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            st.error(
+                f"Failed to refresh historical data: exit {proc.returncode}"
+            )
+            if proc.stderr:
+                st.code(proc.stderr)
+            return pd.DataFrame()
     except Exception as exc:  # pragma: no cover - UI surface
         st.error(f"Failed to refresh historical data: {exc}")
         return pd.DataFrame()
