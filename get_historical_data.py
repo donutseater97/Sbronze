@@ -10,6 +10,8 @@ dfs = []                      # Create an empty list to store each fund's data
 for ticker in tickers:        # Loop through each ticker symbol in the list
     fund = yf.Ticker(ticker)
     df = fund.history().reset_index()[["Date", "Open"]]         # Make 'Date' a column and keep only 'Date' and 'Open' price
+    # Normalize date to naive YYYY-MM-DD (drop timezone)
+    df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_localize(None)
     df = df.rename(columns={"Open": ticker})          # Rename 'Open' column to the ticker symbol
     dfs.append(df) 
 # Merge all dataframes on 'Date' so each ticker's prices are in separate columns
@@ -19,6 +21,9 @@ for df in dfs[1:]:            # Loop through the rest of the dataframes
 
 # Round all numeric columns to 2 decimal places
 table.iloc[:, 1:] = table.iloc[:, 1:].round(2)
+
+# Ensure Date is string yyyy-mm-dd for downstream display
+table["Date"] = pd.to_datetime(table["Date"]).dt.strftime("%Y-%m-%d")
 
 # Save to CSV for downstream use
 table.to_csv("historical_data.csv", index=False)
