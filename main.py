@@ -574,9 +574,14 @@ def transaction_history():
     col1, col2 = st.columns(2)
     with col1:
         if len(transactions) > 0:
-            # Sort transactions to get the first registered transaction date
-            first_trans_date = pd.to_datetime(transactions["Date"]).sort_values().iloc[0].date()
-            start_date = st.date_input("Start Date:", value=first_trans_date, key="trans_start_date")
+            # Get the first registered transaction date (earliest date in transaction history)
+            first_trans_date = pd.to_datetime(transactions["Date"]).min().date()
+            
+            # Initialize session state for start date if not set or if it's before first transaction
+            if "trans_start_date" not in st.session_state or st.session_state.trans_start_date < first_trans_date:
+                st.session_state.trans_start_date = first_trans_date
+            
+            start_date = st.date_input("Start Date:", value=st.session_state.trans_start_date, key="trans_start_date_input")
         else:
             start_date = None
     with col2:
@@ -585,6 +590,10 @@ def transaction_history():
             end_date = st.date_input("End Date:", value=max_date, key="trans_end_date")
         else:
             end_date = None
+    
+    # Update start_date from input
+    if len(transactions) > 0:
+        start_date = st.session_state.trans_start_date_input
     
     if len(transactions) > 0:
         trans_df = transactions.copy()
