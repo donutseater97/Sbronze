@@ -543,7 +543,7 @@ def transaction_history():
         trans_df["Gross Contribution (real)"] = trans_df["Quantity"] * trans_df["Price (€)"] + trans_df["Fees (€)"]
         trans_df["Gross Contribution (theor)"] = (trans_df["Gross Contribution (real)"] / 10).round() * 10
         trans_df["Net Invested"] = trans_df["Quantity"] * trans_df["Price (€)"]
-        trans_df["Δ Net Inv vs Exp"] = trans_df["Net Invested"] - trans_df["Gross Contribution (theor)"] - trans_df["Fees (€)"]
+        trans_df["Δ Net Inv vs Exp"] = trans_df["Net Invested"] - trans_df["Gross Contribution (theor)"] + trans_df["Fees (€)"]
         trans_df["Quantity (theor)"] = (trans_df["Gross Contribution (theor)"] - trans_df["Fees (€)"]) / trans_df["Price (€)"]
         trans_df["Δ Quantity"] = trans_df["Quantity (theor)"] - trans_df["Quantity"]
         trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
@@ -576,6 +576,25 @@ def transaction_history():
             "Δ Quantity",
         ]
         
+        # Determine per-fund decimal precision based on all transactions' Quantity
+        def _count_decimals(num):
+            if pd.isna(num):
+                return 0
+            s = f"{float(num):.6f}".rstrip('0').rstrip('.')
+            if '.' in s:
+                return min(len(s.split('.')[-1]), 6)
+            return 0
+        try:
+            fund_qty_decimals = (
+                transactions.groupby("Fund")["Quantity"].apply(
+                    lambda s: max((_count_decimals(v) for v in s if pd.notna(v)), default=0)
+                ).to_dict()
+            )
+        except Exception:
+            fund_qty_decimals = {}
+        # Cap decimals to max 3
+        fund_qty_decimals = {f: min(int(d or 0), 3) for f, d in fund_qty_decimals.items()}
+        
         # Preserve raw numeric values
         display_df["_delta_net_inv_raw"] = trans_df["Δ Net Inv vs Exp"].values
         display_df["_delta_qty_raw"] = trans_df["Δ Quantity"].values
@@ -597,11 +616,18 @@ def transaction_history():
             axis=1
         )
         
-        # Combine Quantity (theor) with delta - with flexible formatting
-        display_df["Quantity (theor) (Δ vs Q real)"] = display_df.apply(
-            lambda row: f"{format_qty(row['Quantity (theor)'])} ({row['_delta_qty_raw']:+.3f})" if pd.notna(row['_delta_qty_raw']) else format_qty(row['Quantity (theor)']),
-            axis=1
-        )
+        # Combine Quantity (theor) with delta - decimals based on fund usage
+        def format_qty_calc(row):
+            dp = fund_qty_decimals.get(row["Fund"], 3)
+            q = row["Quantity (theor)"]
+            dq = row["_delta_qty_raw"]
+            q_str = "" if pd.isna(q) else f"{round(q, dp):.{dp}f}"
+            if pd.notna(dq):
+                dq_str = f" ({round(dq, dp):+.{dp}f})"
+            else:
+                dq_str = ""
+            return q_str + dq_str
+        display_df["Quantity (theor) (Δ vs Q real)"] = display_df.apply(format_qty_calc, axis=1)
         
         # Format Quantity column with flexible decimals
         display_df["Quantity"] = display_df["Quantity"].apply(format_qty)
