@@ -324,7 +324,7 @@ def overview_and_charts():
         display_summary["_MoM_raw"] = summary["MoM performance (%)"]
         
         # Format numeric columns
-        for col in ["Gross Contributions (€)", "Fees (€)", "Net Invested (€)", "Average NAV (€)", "Latest Price (€)", "Market Value (€)"]:
+        for col in ["Gross Contributions (€)", "Fees (€)", "Net Invested (€)", "Average NAV (€)", "Market Value (€)"]:
             display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
         
         display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
