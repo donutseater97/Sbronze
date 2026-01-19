@@ -31,10 +31,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate historical data CSV
-        run: |
-          python get_historical_data.py
-
       - name: Ensure clean working tree
         run: |
           git reset --hard HEAD
@@ -43,6 +39,10 @@ jobs:
       - name: Pull latest changes
         run: |
           git pull --rebase origin main
+
+      - name: Generate historical data CSV
+        run: |
+          python get_historical_data.py
 
       - name: Commit updated historical_data.csv
         uses: stefanzweifel/git-auto-commit-action@v5
