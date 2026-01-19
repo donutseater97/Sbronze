@@ -543,7 +543,7 @@ def transaction_history():
         trans_df["Gross Contribution (real)"] = trans_df["Quantity"] * trans_df["Price (€)"] + trans_df["Fees (€)"]
         trans_df["Gross Contribution (theor)"] = (trans_df["Gross Contribution (real)"] / 10).round() * 10
         trans_df["Net Invested"] = trans_df["Quantity"] * trans_df["Price (€)"]
-        trans_df["Δ Net Inv vs Gro Con (r)"] = trans_df["Net Invested"] - (trans_df["Gross Contribution (real)"] - trans_df["Fees (€)"])
+        trans_df["Δ Net Inv vs Exp"] = trans_df["Net Invested"] - (trans_df["Gross Contribution (real)"] - trans_df["Fees (€)"])
         trans_df["Quantity (theor)"] = (trans_df["Gross Contribution (theor)"] - trans_df["Fees (€)"]) / trans_df["Price (€)"]
         trans_df["Δ Quantity"] = trans_df["Quantity (theor)"] - trans_df["Quantity"]
         trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
@@ -557,9 +557,8 @@ def transaction_history():
             "Quantity",
             "Fees (€)",
             "Gross Contribution (theor)",
-            "Gross Contribution (real)",
             "Net Invested",
-            "Δ Net Inv vs Gro Con (r)",
+            "Δ Net Inv vs Exp",
             "Quantity (theor)",
             "Δ Quantity",
         ]].copy()
@@ -571,54 +570,35 @@ def transaction_history():
             "Quantity",
             "Fees (€)",
             "Gross Contribution (theor)",
-            "Gross Contribution (real)",
             "Net Invested",
-            "Δ Net Inv vs Gro Con (r)",
+            "Δ Net Inv vs Exp",
             "Quantity (theor)",
             "Δ Quantity",
         ]
         
-        # Format numbers to show minimum decimals
-        def format_number(x):
-            if pd.isna(x):
-                return ""
-            if isinstance(x, (int, float)):
-                if x == int(x):
-                    return str(int(x))
-                return f"{x:.10g}"
-            return str(x)
-        
-        def format_money(x):
-            if pd.isna(x):
-                return ""
-            return f"€ {x:,.2f}"
-
-        def format_qty(x):
-            if pd.isna(x):
-                return ""
-            return f"{x:,.3f}"
-
-        display_df["Price (€)"] = display_df["Price (€)"].apply(format_money)
-        display_df["Quantity"] = display_df["Quantity"].apply(format_qty)
-        display_df["Fees (€)"] = display_df["Fees (€)"].apply(format_money)
-        display_df["Gross Contribution (real)"] = display_df["Gross Contribution (real)"].apply(format_money)
-        display_df["Gross Contribution (theor)"] = display_df["Gross Contribution (theor)"].apply(format_money)
-        display_df["Net Invested"] = display_df["Net Invested"].apply(format_money)
-        display_df["Δ Net Inv vs Gro Con (r)"] = display_df["Δ Net Inv vs Gro Con (r)"].apply(format_money)
-        display_df["Quantity (theor)"] = display_df["Quantity (theor)"].apply(format_qty)
-        display_df["Quantity (theor) (Δ vs Q real)"] = display_df["Quantity (theor)"] + display_df["Δ Quantity"].apply(lambda x: f" ({x:+.3f})" if pd.notna(x) else "")
-
-        # Preserve raw deltas for styling
-        display_df["_delta_net_inv_raw"] = trans_df["Δ Net Inv vs Gro Con (r)"].values
+        # Preserve raw numeric values
+        display_df["_delta_net_inv_raw"] = trans_df["Δ Net Inv vs Exp"].values
         display_df["_delta_qty_raw"] = trans_df["Δ Quantity"].values
+        
+        # Combine Net Invested with delta
+        display_df["Net Invested (Δ vs Exp)"] = display_df.apply(
+            lambda row: f"{row['Net Invested']:.2f} ({row['_delta_net_inv_raw']:+.2f})" if pd.notna(row['_delta_net_inv_raw']) else f"{row['Net Invested']:.2f}",
+            axis=1
+        )
+        
+        # Combine Quantity (theor) with delta
+        display_df["Quantity (theor) (Δ vs Q real)"] = display_df.apply(
+            lambda row: f"{row['Quantity (theor)']:.3f} ({row['_delta_qty_raw']:+.3f})" if pd.notna(row['_delta_qty_raw']) else f"{row['Quantity (theor)']:.3f}",
+            axis=1
+        )
 
-        # Drop helper columns not meant for display
-        display_df = display_df.drop(columns=["Quantity (theor)", "Δ Quantity"])
+        # Drop calculation columns
+        display_df = display_df.drop(columns=["Net Invested", "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity"])
         
         # Add fund column for styling
         display_df["_fund_type"] = trans_df["Fund"].values
         
-        # Create styled dataframe with color hue
+        # Create styled dataframe with hue only for Fund column
         def style_fund_rows(row):
             fund_type = row["_fund_type"]
             hex_color = FUND_COLORS.get(fund_type, "#000000")
@@ -628,33 +608,31 @@ def transaction_history():
             rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
             styles = []
             for col in row.index:
-                if col == "_fund_type":
+                if col.startswith("_"):
                     styles.append("display: none;")
-                elif col == "Δ Net Inv vs Gro Con (r)":
-                    delta_val = row.get("_delta_net_inv_raw", 0)
-                    styles.append("color: green;" if delta_val >= 0 else "color: red;")
-                elif col == "Quantity (theor) (Δ vs Q real)":
-                    delta_q = row.get("_delta_qty_raw", 0)
-                    styles.append("color: green;" if delta_q >= 0 else "color: red;")
-                else:
+                elif col == "Fund":
                     styles.append("background-color: " + rgba)
+                else:
+                    styles.append("")
             return styles
         
         styled_df = display_df.style.apply(style_fund_rows, axis=1)
         
         # Display interactive dataframe with sorting and filtering
         st.dataframe(styled_df, width="stretch", hide_index=True, column_config={
-            "_fund_type": None  # Hide the column
+            "Price (€)": st.column_config.NumberColumn(format="€%.2f"),
+            "Quantity": st.column_config.NumberColumn(format="%.3f"),
+            "Fees (€)": st.column_config.NumberColumn(format="€%.2f"),
+            "Gross Contribution (theor)": st.column_config.NumberColumn(format="€%.2f"),
         })
         
         # Totals row
         st.markdown("")
         st.markdown("**Totals (based on filters):**")
         total_fees = trans_df["Fees (€)"].sum()
-        total_gross_real = trans_df["Gross Contribution (real)"].sum()
         total_gross_theor = trans_df["Gross Contribution (theor)"].sum()
         total_net_invested = trans_df["Net Invested"].sum()
-        total_delta_net_inv = trans_df["Δ Net Inv vs Gro Con (r)"].sum()
+        total_delta_net_inv = trans_df["Δ Net Inv vs Exp"].sum()
         
         # Only show total quantity if exactly one fund is selected
         if len(filter_funds) == 1:
@@ -663,7 +641,7 @@ def transaction_history():
         else:
             quantity_display = "-"
         
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Total Quantity", quantity_display)
         with col2:
@@ -671,8 +649,6 @@ def transaction_history():
         with col3:
             st.metric("Total Gross Contribution (theor)", f"€ {total_gross_theor:,.2f}")
         with col4:
-            st.metric("Total Gross Contribution (real)", f"€ {total_gross_real:,.2f}")
-        with col5:
             st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}", delta=total_delta_net_inv, delta_color="normal")
     else:
         st.info("No transactions yet")
