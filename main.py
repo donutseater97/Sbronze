@@ -10,7 +10,6 @@ import subprocess
 import sys
 import base64
 import requests
-import altair as alt
 
 # ---------- AUTHENTICATION ----------
 OWNER_PASSWORD = "123"
@@ -214,6 +213,11 @@ def overview_and_charts():
         
         # Get latest price from historical data
         hist_data = load_historical_prices()
+        last_hist_date = (
+            pd.to_datetime(hist_data["date"]).max()
+            if len(hist_data) > 0 and "date" in hist_data.columns
+            else None
+        )
         
         # Per-fund decimal precision
         def _count_decimals(num):
@@ -372,7 +376,8 @@ def overview_and_charts():
         
         # Totals row
         st.markdown("")
-        st.markdown("**Totals (based on filters):**")
+        last_date_label = last_hist_date.strftime("%Y-%m-%d") if last_hist_date is not None and pd.notna(last_hist_date) else "-"
+        st.markdown(f"**Totals based on filters (as of {last_date_label}):**")
         total_gross = summary["Gross Contributions (€)"].sum()
         total_fees = summary["Fees (€)"].sum()
         total_net = summary["Net Invested (€)"].sum()
@@ -405,8 +410,8 @@ def overview_and_charts():
             st.metric(
                 "Total Fees",
                 f"€ {total_fees:,.2f}",
-                delta=f"{total_fees_pct:+.2f}%",
-                delta_color="normal",
+                delta=f"{total_fees_pct:.2f}%",
+                delta_color="off",
             )
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
@@ -625,7 +630,7 @@ def transaction_history():
             "Price (€)",
             "Quantity",
             "Fees (€)",
-            "Gross Contribution (theor)",
+            "Gross Contribution",
             "Net Invested",
             "Δ Net Inv vs Exp",
             "Quantity (theor)",
@@ -754,7 +759,7 @@ def transaction_history():
         st.dataframe(styled_df, width="stretch", hide_index=True, column_config={
             "Price (€)": st.column_config.NumberColumn(format="€%.2f"),
             "Fees (€)": st.column_config.NumberColumn(format="€%.2f"),
-            "Gross Contribution (theor)": st.column_config.NumberColumn(format="€%.2f"),
+            "Gross Contribution": st.column_config.NumberColumn(format="€%.2f"),
             "_delta_net_inv_raw": None,
             "_delta_qty_raw": None,
             "_delta_net_inv_disp": None,
@@ -828,11 +833,11 @@ def transaction_history():
         # Display totals in 2 rows x 3 columns
         row1_col1, row1_col2, row1_col3 = st.columns(3)
         with row1_col1:
-            st.metric("Total Gross Contribution (theor)", f"€ {total_gross_theor:,.2f}")
+            st.metric("Total Gross Contribution", f"€ {total_gross_theor:,.2f}")
         with row1_col2:
             st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
         with row1_col3:
-            st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"+{fees_pct:.2f}%")
+            st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"{fees_pct:.2f}%", delta_color="off")
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
@@ -885,7 +890,7 @@ def active_funds():
         st.info("No funds added yet")
 
 def historical_prices():
-    st.header("📈 Fund NAV (History)")
+    st.header("📈 Historical Data Charts")
     
     # Initialize session state for refresh
     if "force_refresh" not in st.session_state:
@@ -1008,17 +1013,31 @@ def historical_prices():
 
     # Combined view
     if st.session_state.hist_view_mode == "combined":
-        long_df = plot_df.melt(id_vars=["date"], value_vars=selected_funds, var_name="Fund", value_name="NAV")
-        color_scale = alt.Scale(domain=list(FUND_COLORS.keys()), range=list(FUND_COLORS.values()))
-        combined_chart = (
-            alt.Chart(long_df).mark_line(strokeWidth=2).encode(
-                x=alt.X("date:T", title="Date"),
-                y=alt.Y("NAV:Q", title="NAV (€)"),
-                color=alt.Color("Fund:N", scale=color_scale),
-                tooltip=["date:T", "Fund:N", alt.Tooltip("NAV:Q", format=",.2f")],
-            ).properties(height=400)
+        fig_combined = go.Figure()
+        for fund in selected_funds:
+            fund_df = plot_df[["date", fund]].dropna().sort_values("date")
+            if len(fund_df) == 0:
+                continue
+            fig_combined.add_trace(
+                go.Scatter(
+                    x=fund_df["date"],
+                    y=fund_df[fund],
+                    mode="lines",
+                    name=fund,
+                    line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
+                    hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+                )
+            )
+
+        fig_combined.update_layout(
+            height=450,
+            hovermode="x unified",
+            xaxis_title="Date",
+            yaxis_title="NAV (€)",
+            template="plotly_white",
+            legend_title="Fund",
         )
-        st.altair_chart(combined_chart, width="stretch")
+        st.plotly_chart(fig_combined, use_container_width=True)
     else:
         # Grid view with dynamic y-axis scaling per fund
         if len(selected_funds) > 6:
@@ -1026,27 +1045,37 @@ def historical_prices():
         else:
             cols_per_row = min(3, len(selected_funds))
         
-        # Create rows of charts
         rows = [selected_funds[i:i+cols_per_row] for i in range(0, len(selected_funds), cols_per_row)]
         for row in rows:
             cols = st.columns(len(row))
             for idx, fund in enumerate(row):
                 with cols[idx]:
-                    fhex = FUND_COLORS.get(fund, "#999999")
-                    fund_df = plot_df[["date", fund]].rename(columns={fund: "NAV"}).dropna()
+                    fund_df = plot_df[["date", fund]].dropna().sort_values("date")
                     if len(fund_df) > 0:
-                        # Dynamic y-axis: scale to min/max of this fund's data
-                        y_min = fund_df["NAV"].min() * 0.95
-                        y_max = fund_df["NAV"].max() * 1.05
-                        chart = (
-                            alt.Chart(fund_df).mark_line(strokeWidth=2).encode(
-                                x=alt.X("date:T", title="Date"),
-                                y=alt.Y("NAV:Q", title=f"{fund} NAV (€)", scale=alt.Scale(domain=[y_min, y_max])),
-                                color=alt.value(fhex),
-                                tooltip=["date:T", alt.Tooltip("NAV:Q", format=",.2f")],
-                            ).properties(height=300)
+                        y_min = fund_df[fund].min() * 0.95
+                        y_max = fund_df[fund].max() * 1.05
+                        fig = go.Figure()
+                        fig.add_trace(
+                            go.Scatter(
+                                x=fund_df["date"],
+                                y=fund_df[fund],
+                                mode="lines",
+                                name=fund,
+                                line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
+                                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+                            )
                         )
-                        st.altair_chart(chart, width="stretch")
+                        fig.update_layout(
+                            height=300,
+                            hovermode="x unified",
+                            xaxis_title="Date",
+                            yaxis_title="NAV (€)",
+                            template="plotly_white",
+                            margin=dict(l=40, r=20, t=40, b=40),
+                            yaxis=dict(range=[y_min, y_max]),
+                            showlegend=False,
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info(f"No data for {fund}")
 
@@ -1202,7 +1231,7 @@ pg = st.navigation({
     "Sbronze Menu": [
         st.Page(overview_and_charts, title="📊 Overview & Charts"),
         st.Page(transaction_history, title="📜 Transaction History"),
-        st.Page(historical_prices, title="📈 Fund NAV (History)"),
+        st.Page(historical_prices, title="📈 Historical Data Charts"),
         st.Page(active_funds, title="📋 Active Funds"),
         st.Page(add_transactions_and_funds, title="➕ Add Transactions & Funds"),
     ]
