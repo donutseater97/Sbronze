@@ -308,8 +308,9 @@ def overview_and_charts():
         display_summary = summary[[
             "Fund",                          # Fund identifier
             "Gross Contributions (€)",       # Sum of all investment amounts (quantity × price)
-            "Fees (€)",                      # Total transaction fees paid
             "Net Invested (€)",              # Gross contributions plus fees (actual cash outlay)
+            "Fees (€)",                      # Total transaction fees paid
+            "Latest Price (€)",              # Latest price from historical data
             "Average NAV (€)",               # Average price per unit (gross contributions ÷ quantity)
             "Quantity",                      # Total units/shares held
             "Market Value (€)",              # Current portfolio value (quantity × latest price)
@@ -328,7 +329,7 @@ def overview_and_charts():
         display_summary["_MoM_raw"] = summary["MoM performance (%)"]
         
         # Format numeric columns
-        for col in ["Gross Contributions (€)", "Fees (€)", "Net Invested (€)", "Average NAV (€)", "Market Value (€)"]:
+        for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Latest Price (€)", "Average NAV (€)", "Market Value (€)"]:
             display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
         
         display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
