@@ -10,7 +10,7 @@ dfs = []
 for ticker in tickers:
     try:
         fund = yf.Ticker(ticker)
-        df = fund.history(period="max", interval="1d").reset_index()[["Date", "Open"]]
+        df = fund.history(period="1y", interval="1d").reset_index()[["Date", "Open"]]
         # Normalize date to naive and keep daily resolution
         df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_localize(None)
         df = df.rename(columns={"Open": ticker})
@@ -18,15 +18,11 @@ for ticker in tickers:
     except Exception as e:
         print(f"WARN: failed to fetch {ticker}: {e}")
 
-if not dfs:
-    raise SystemExit("No data fetched; check tickers or network")
+table = dfs[0]                # Start with the first dataframe
 
-# Merge all dataframes on Date with outer join
-table = dfs[0]
-for df in dfs[1:]:
-    table = pd.merge(table, df, on="Date", how="outer")
+for df in dfs[1:]:            # Loop through the rest of the dataframes
+    table = pd.merge(table, df, on="Date", how="outer")  # Merge them together by 'Date'
 
-# Sort by Date ascending
 table = table.sort_values("Date").reset_index(drop=True)
 
 # Forward-fill within each series; NaNs before first value remain NaN
@@ -34,21 +30,22 @@ for col in table.columns:
     if col != "Date":
         table[col] = table[col].ffill()
 
-# Round numeric columns to 2 decimals
+# Round numeric columns to 2 decimals and format Date column
 num_cols = [c for c in table.columns if c != "Date"]
 table[num_cols] = table[num_cols].round(2)
+table["Date"] = table["Date"].dt.strftime("%Y-%m-%d")
 
-# Map ticker columns to Fund names (e.g., 0P0001CRXW.F -> US)
+table = table.sort_values("Date", ascending=False).reset_index(drop=True)
+
+# Rename columns from ticker symbols to fund names
 rename_map = {}
 for ticker in fund_map.keys():
-    yahoo_col = f"{ticker}.F"
-    if yahoo_col in table.columns:
-        rename_map[yahoo_col] = fund_map[ticker]
+    ticker_col = f"{ticker}.F"
+    if ticker_col in table.columns:
+        rename_map[ticker_col] = fund_map[ticker]
 table = table.rename(columns=rename_map)
 
-# Ensure Date is string yyyy-mm-dd
-table["Date"] = pd.to_datetime(table["Date"]).dt.strftime("%Y-%m-%d")
-
-# Save to CSV for downstream use
+# Save the table to CSV
 table.to_csv("historical_data.csv", index=False)
+
 print("Saved historical_data.csv with", len(table), "rows and", len(table.columns), "columns")
