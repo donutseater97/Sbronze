@@ -144,7 +144,7 @@ def overview_and_charts():
             with cols[idx]:
                 is_active = fund in st.session_state.portfolio_fund_filter
                 hex_color = FUND_COLORS.get(fund, "#999999")
-                if st.button(fund, key=f"portfolio_btn_{fund}", type="primary" if is_active else "secondary", use_container_width=True):
+                if st.button(fund, key=f"portfolio_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
                     if is_active:
                         st.session_state.portfolio_fund_filter.remove(fund)
                     else:
@@ -153,7 +153,7 @@ def overview_and_charts():
         
         # Reset button in last column
         with cols[-1]:
-            if st.button("✕", key="reset_portfolio_filters", help="Reset filters", use_container_width=True):
+            if st.button("✕", key="reset_portfolio_filters", help="Reset filters", width="stretch"):
                 st.session_state.portfolio_fund_filter = funds["Fund"].tolist()
                 st.rerun()
         filter_funds = st.session_state.portfolio_fund_filter
@@ -298,7 +298,7 @@ def overview_and_charts():
             return styles
         
         styled_summary = display_summary.style.apply(style_fund_rows, axis=1)
-        st.dataframe(styled_summary, use_container_width=True, hide_index=False)
+        st.dataframe(styled_summary, width="stretch", hide_index=False)
         
         # Totals row
         st.markdown("")
@@ -371,7 +371,7 @@ def overview_and_charts():
             hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
         )])
         fig_alloc.update_layout(height=450, showlegend=True, hovermode="closest")
-        st.plotly_chart(fig_alloc, use_container_width=True)
+        st.plotly_chart(fig_alloc, width="stretch")
 
         df["date_dt"] = pd.to_datetime(df["Date"], errors="coerce")
         df = df.dropna(subset=["date_dt"])  
@@ -397,7 +397,7 @@ def overview_and_charts():
                 yaxis_title="Invested (€)",
                 template="plotly_white"
             )
-            st.plotly_chart(fig_time, use_container_width=True)
+            st.plotly_chart(fig_time, width="stretch")
         else:
             st.info("No valid dates for 'Invested Over Time' chart")
 
@@ -421,7 +421,7 @@ def overview_and_charts():
                 yaxis_title="Invested (€)",
                 template="plotly_white"
             )
-            st.plotly_chart(fig_monthly, use_container_width=True)
+            st.plotly_chart(fig_monthly, width="stretch")
         else:
             st.info("No valid dates for 'Monthly Investments' chart")
     else:
@@ -464,7 +464,7 @@ def transaction_history():
             with cols[idx]:
                 is_active = fund in st.session_state.trans_fund_filter
                 hex_color = FUND_COLORS.get(fund, "#999999")
-                if st.button(fund, key=f"trans_btn_{fund}", type="primary" if is_active else "secondary", use_container_width=True):
+                if st.button(fund, key=f"trans_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
                     if is_active:
                         st.session_state.trans_fund_filter.remove(fund)
                     else:
@@ -473,7 +473,7 @@ def transaction_history():
         
         # Reset button in last column
         with cols[-1]:
-            if st.button("✕", key="reset_trans_filters", help="Reset filters", use_container_width=True):
+            if st.button("✕", key="reset_trans_filters", help="Reset filters", width="stretch"):
                 st.session_state.trans_fund_filter = funds["Fund"].tolist()
                 st.rerun()
         filter_funds = st.session_state.trans_fund_filter
@@ -551,7 +551,7 @@ def transaction_history():
         styled_df = display_df.style.apply(style_fund_rows, axis=1)
         
         # Display interactive dataframe with sorting and filtering
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config={
+        st.dataframe(styled_df, width="stretch", hide_index=True, column_config={
             "_fund_type": None  # Hide the column
         })
         
@@ -614,7 +614,7 @@ def active_funds():
         
         styled_funds = display_funds.style.apply(style_fund_rows, axis=1)
         
-        st.dataframe(styled_funds, use_container_width=True, hide_index=True, column_config={
+        st.dataframe(styled_funds, width="stretch", hide_index=True, column_config={
             "_fund_type": None  # Hide the column
         })
     else:
@@ -693,14 +693,14 @@ def historical_prices():
         for idx, fund in enumerate(fund_cols):
             with cols[idx]:
                 is_active = fund in st.session_state.historical_fund_filter
-                if st.button(fund, key=f"hist_btn_{fund}", type="primary" if is_active else "secondary", use_container_width=True):
+                if st.button(fund, key=f"hist_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
                     if is_active:
                         st.session_state.historical_fund_filter.remove(fund)
                     else:
                         st.session_state.historical_fund_filter.append(fund)
                     st.rerun()
         with cols[-1]:
-            if st.button("✕", key="reset_hist_filters", help="Reset filters", use_container_width=True):
+            if st.button("✕", key="reset_hist_filters", help="Reset filters", width="stretch"):
                 st.session_state.historical_fund_filter = fund_cols
                 st.rerun()
         selected_funds = st.session_state.historical_fund_filter
@@ -738,7 +738,7 @@ def historical_prices():
                 tooltip=["date:T", "Fund:N", alt.Tooltip("NAV:Q", format=",.2f")],
             ).properties(height=400)
         )
-        st.altair_chart(combined_chart, use_container_width=True)
+        st.altair_chart(combined_chart, width="stretch")
     else:
         # Grid view with dynamic y-axis scaling per fund
         show_funds = selected_funds[:6]
@@ -764,7 +764,7 @@ def historical_prices():
                                 tooltip=["date:T", alt.Tooltip("NAV:Q", format=",.2f")],
                             ).properties(height=250)
                         )
-                        st.altair_chart(chart, use_container_width=True)
+                        st.altair_chart(chart, width="stretch")
                     else:
                         st.info(f"No data for {fund}")
 
@@ -795,7 +795,7 @@ def historical_prices():
         st.markdown(header_css, unsafe_allow_html=True)
         
         # Display formatted table
-        st.dataframe(historical_data_df, use_container_width=True, hide_index=True,
+        st.dataframe(historical_data_df, width="stretch", hide_index=True,
                      column_config={col: st.column_config.NumberColumn(format="€%.2f") for col in selected_funds})
     else:
         st.info("No historical data to display")
