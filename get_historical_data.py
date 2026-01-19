@@ -10,7 +10,7 @@ dfs = []
 for ticker in tickers:
     try:
         fund = yf.Ticker(ticker)
-        df = fund.history(period="1y", interval="1d").reset_index()[["Date", "Open"]]
+        df = fund.history(period="100y", interval="1d").reset_index()[["Date", "Open"]]
         # Normalize date to naive and keep daily resolution
         df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_localize(None)
         df = df.rename(columns={"Open": ticker})
