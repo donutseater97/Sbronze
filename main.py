@@ -598,6 +598,24 @@ def transaction_history():
         # Preserve raw numeric values
         display_df["_delta_net_inv_raw"] = trans_df["Δ Net Inv vs Exp"].values
         display_df["_delta_qty_raw"] = trans_df["Δ Quantity"].values
+
+        # Rounded/display deltas for styling (use same precision as shown)
+        def format_delta_net_inv(val):
+            if pd.isna(val):
+                return None
+            rounded = round(val, 2)
+            return 0.0 if abs(rounded) < 0.005 else rounded
+
+        def format_delta_qty(row):
+            dq = row["_delta_qty_raw"]
+            if pd.isna(dq):
+                return None
+            dp = fund_qty_decimals.get(row["Fund"], 3)
+            rounded = round(dq, dp)
+            return 0.0 if abs(rounded) < 10 ** (-dp) else rounded
+
+        display_df["_delta_net_inv_disp"] = display_df["_delta_net_inv_raw"].apply(format_delta_net_inv)
+        display_df["_delta_qty_disp"] = display_df.apply(format_delta_qty, axis=1)
         
         # Quantity formatting function: max 3 decimals, no trailing zeros
         def format_qty(val):
@@ -638,20 +656,38 @@ def transaction_history():
         # Add fund column for styling
         display_df["_fund_type"] = trans_df["Fund"].values
         
-        # Create styled dataframe with hue only for Fund column
+        # Create styled dataframe with hue for Fund and deltas
         def style_fund_rows(row):
             fund_type = row["_fund_type"]
             hex_color = FUND_COLORS.get(fund_type, "#000000")
             # Convert hex to rgba with light alpha
             if hex_color.startswith('#'):
                 hex_color = hex_color[1:]
-            rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
+            fund_rgba = f"rgba({int(hex_color[0:2], 16)}, {int(hex_color[2:4], 16)}, {int(hex_color[4:6], 16)}, 0.15)"
+            green_rgba = "rgba(46, 160, 67, 0.12)"
+            red_rgba = "rgba(248, 81, 73, 0.12)"
             styles = []
             for col in row.index:
                 if col.startswith("_"):
                     styles.append("display: none;")
                 elif col == "Fund":
-                    styles.append("background-color: " + rgba)
+                    styles.append("background-color: " + fund_rgba)
+                elif col == "Net Invested (Δ vs Exp)":
+                    delta_val = row.get("_delta_net_inv_disp", None)
+                    if delta_val is None or delta_val == 0:
+                        styles.append("")
+                    elif delta_val > 0:
+                        styles.append("background-color: " + green_rgba)
+                    else:
+                        styles.append("background-color: " + red_rgba)
+                elif col == "Quantity (theor) (Δ vs Q real)":
+                    delta_val = row.get("_delta_qty_disp", None)
+                    if delta_val is None or delta_val == 0:
+                        styles.append("")
+                    elif delta_val > 0:
+                        styles.append("background-color: " + green_rgba)
+                    else:
+                        styles.append("background-color: " + red_rgba)
                 else:
                     styles.append("")
             return styles
@@ -665,6 +701,8 @@ def transaction_history():
             "Gross Contribution (theor)": st.column_config.NumberColumn(format="€%.2f"),
             "_delta_net_inv_raw": None,
             "_delta_qty_raw": None,
+            "_delta_net_inv_disp": None,
+            "_delta_qty_disp": None,
             "_fund_type": None,
         })
         
@@ -692,8 +730,14 @@ def transaction_history():
             # For each transaction: delta_qty * latest_price - delta_qty * row_price
             for _, row in trans_df.iterrows():
                 fund = row["Fund"]
-                delta_qty = row["Δ Quantity"]
+                delta_qty_raw = row["Δ Quantity"]
                 row_price = row["Price (€)"]
+
+                # Use displayed precision for delta qty (per fund)
+                dp = fund_qty_decimals.get(fund, 3)
+                delta_qty = round(delta_qty_raw, dp) if pd.notna(delta_qty_raw) else None
+                if delta_qty is not None and abs(delta_qty) < 10 ** (-dp):
+                    delta_qty = 0.0
 
                 if pd.notna(delta_qty) and fund in hist_data.columns:
                     # Get latest price for this fund
@@ -721,13 +765,11 @@ def transaction_history():
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
-            delta_color = "normal" if pl_price_approx >= 0 else "inverse"
-            st.metric("P/L Price approx.", f"€ {pl_price_approx:,.2f}", delta=pl_price_approx, delta_color=delta_color)
+            st.metric("P/L Price approx.", f"€ {pl_price_approx:+,.2f}")
         with row2_col2:
-            delta_color_qty = "normal" if pl_qty_approx >= 0 else "inverse"
-            st.metric(f"P/L Quantity approx. (as of {latest_date_str})", f"€ {pl_qty_approx:,.2f}", delta=pl_qty_approx, delta_color=delta_color_qty)
+            st.metric(f"P/L Quantity approx. (as of {latest_date_str})", f"€ {pl_qty_approx:+,.2f}")
         with row2_col3:
-            st.metric("Avg NAV", avg_nav_display)
+            st.metric("Avg NAV", avg_nav_display if avg_nav_display else "-")
     else:
         st.info("No transactions yet")
 
