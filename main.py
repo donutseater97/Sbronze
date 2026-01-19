@@ -1039,45 +1039,66 @@ def historical_prices():
         )
         st.plotly_chart(fig_combined, use_container_width=True)
     else:
-        # Grid view with dynamic y-axis scaling per fund
+        # Grid view with synchronized hover using subplots
+        from plotly.subplots import make_subplots
+        
         if len(selected_funds) > 6:
             cols_per_row = 2
         else:
             cols_per_row = min(3, len(selected_funds))
         
-        rows = [selected_funds[i:i+cols_per_row] for i in range(0, len(selected_funds), cols_per_row)]
-        for row in rows:
-            cols = st.columns(len(row))
-            for idx, fund in enumerate(row):
-                with cols[idx]:
-                    fund_df = plot_df[["date", fund]].dropna().sort_values("date")
-                    if len(fund_df) > 0:
-                        y_min = fund_df[fund].min() * 0.95
-                        y_max = fund_df[fund].max() * 1.05
-                        fig = go.Figure()
-                        fig.add_trace(
-                            go.Scatter(
-                                x=fund_df["date"],
-                                y=fund_df[fund],
-                                mode="lines",
-                                name=fund,
-                                line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
-                                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
-                            )
-                        )
-                        fig.update_layout(
-                            height=300,
-                            hovermode="x unified",
-                            xaxis_title="Date",
-                            yaxis_title="NAV (€)",
-                            template="plotly_white",
-                            margin=dict(l=40, r=20, t=40, b=40),
-                            yaxis=dict(range=[y_min, y_max]),
-                            showlegend=False,
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info(f"No data for {fund}")
+        # Calculate grid dimensions
+        num_rows = (len(selected_funds) + cols_per_row - 1) // cols_per_row
+        
+        # Create subplots
+        fig_grid = make_subplots(
+            rows=num_rows,
+            cols=cols_per_row,
+            subplot_titles=[fund for fund in selected_funds],
+            vertical_spacing=0.12,
+            horizontal_spacing=0.08,
+        )
+        
+        # Add traces to subplots
+        for idx, fund in enumerate(selected_funds):
+            row_num = idx // cols_per_row + 1
+            col_num = idx % cols_per_row + 1
+            
+            fund_df = plot_df[["date", fund]].dropna().sort_values("date")
+            if len(fund_df) > 0:
+                y_min = fund_df[fund].min() * 0.95
+                y_max = fund_df[fund].max() * 1.05
+                
+                fig_grid.add_trace(
+                    go.Scatter(
+                        x=fund_df["date"],
+                        y=fund_df[fund],
+                        mode="lines",
+                        name=fund,
+                        line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
+                        hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+                        showlegend=False,
+                    ),
+                    row=row_num,
+                    col=col_num,
+                )
+                
+                # Update y-axis range for this subplot
+                fig_grid.update_yaxes(range=[y_min, y_max], row=row_num, col=col_num)
+        
+        # Update layout for synchronized hover
+        fig_grid.update_layout(
+            height=300 * num_rows,
+            hovermode="x unified",
+            template="plotly_white",
+            showlegend=False,
+        )
+        
+        # Update all axes
+        fig_grid.update_xaxes(title_text="Date")
+        fig_grid.update_yaxes(title_text="NAV (€)")
+        
+        st.plotly_chart(fig_grid, use_container_width=True)
 
     # Historical Data Table with colored headers
     st.divider()
