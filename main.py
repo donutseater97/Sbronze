@@ -467,54 +467,129 @@ def overview_and_charts():
         df["date_dt"] = pd.to_datetime(df["Date"], errors="coerce")
         df = df.dropna(subset=["date_dt"])  
         if len(df) > 0:
-            time_df = df.groupby("date_dt")["invested"].sum().reset_index()
-            time_df = time_df.sort_values("date_dt")
-            time_df.columns = ["Date", "Value"]
-            st.subheader("📈 Invested Over Time")
-            fig_time = go.Figure()
-            fig_time.add_trace(go.Scatter(
-                x=time_df["Date"],
-                y=time_df["Value"],
-                mode="lines+markers",
-                name="Invested",
-                line=dict(color="#667eea", width=3),
-                marker=dict(size=6),
-                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>"
+            # Build cumulative Gross Contribution (stair-step) and market value evolution
+            df_sorted = df.sort_values("date_dt")
+            df_sorted["Gross Contribution"] = df_sorted["Quantity"] * df_sorted["Price (€)"] + df_sorted["Fees (€)"]
+            df_sorted["Cumulative Gross Contribution"] = df_sorted.groupby("Fund")["Gross Contribution"].cumsum().groupby(df_sorted["Fund"]).transform("sum")
+            
+            # Get daily cumulative for all funds combined
+            daily_data = df_sorted.groupby("date_dt").agg({
+                "Gross Contribution": "sum"
+            }).reset_index()
+            daily_data["Cumulative Gross Contribution"] = daily_data["Gross Contribution"].cumsum()
+            daily_data = daily_data.sort_values("date_dt")
+            
+            # Calculate market value over time (requires historical data)
+            hist_data = load_historical_prices()
+            market_value_by_date = []
+            if len(hist_data) > 0:
+                for date in daily_data["date_dt"]:
+                    # Get all transactions up to this date
+                    tx_up_to_date = df_sorted[df_sorted["date_dt"] <= date]
+                    if len(tx_up_to_date) == 0:
+                        continue
+                    
+                    # Get market value as of that date
+                    mv = 0
+                    for fund in tx_up_to_date["Fund"].unique():
+                        fund_tx = tx_up_to_date[tx_up_to_date["Fund"] == fund]
+                        qty = fund_tx["Quantity"].sum()
+                        
+                        # Find closest historical price on or before date
+                        hist_for_fund = hist_data[hist_data["date"] <= date]
+                        if fund in hist_data.columns and len(hist_for_fund) > 0:
+                            closest_row = hist_for_fund.iloc[-1]
+                            price = closest_row[fund] if pd.notna(closest_row[fund]) else None
+                            if price:
+                                mv += qty * price
+                    
+                    market_value_by_date.append({"date": date, "market_value": mv})
+            
+            market_value_df = pd.DataFrame(market_value_by_date) if market_value_by_date else pd.DataFrame()
+            
+            st.subheader("📈 Investment Evolution")
+            fig_evolution = go.Figure()
+            
+            # Stair-step cumulative gross contribution
+            fig_evolution.add_trace(go.Scatter(
+                x=daily_data["date_dt"],
+                y=daily_data["Cumulative Gross Contribution"],
+                mode="lines",
+                name="Cumulative Gross Contribution",
+                line=dict(color="#667eea", width=2.5),
+                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+                fill="tozeroy",
+                fillcolor="rgba(102, 126, 234, 0.1)",
             ))
-            fig_time.update_layout(
+            
+            # Market value overlay
+            if len(market_value_df) > 0:
+                fig_evolution.add_trace(go.Scatter(
+                    x=market_value_df["date"],
+                    y=market_value_df["market_value"],
+                    mode="lines",
+                    name="Market Value",
+                    line=dict(color="#f093fb", width=2.5),
+                    hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+                ))
+            
+            fig_evolution.update_layout(
+                height=400,
                 hovermode="x unified",
-                height=350,
-                xaxis_title="Date",
-                yaxis_title="Invested (€)",
-                template="plotly_white"
+                xaxis_title="",
+                yaxis_title="Value (€)",
+                template="plotly_white",
+                showlegend=True,
+                dragmode="pan",
+                uirevision="overview_evolution",
+                newshape=dict(line_color="#888888"),
             )
-            st.plotly_chart(fig_time, width="stretch")
-        else:
-            st.info("No valid dates for 'Invested Over Time' chart")
-
-        if len(df) > 0:
-            df["month_date"] = df["date_dt"].dt.to_period("M").dt.to_timestamp()
-            monthly = df.groupby("month_date")["invested"].sum().reset_index()
-            monthly = monthly.sort_values("month_date")
-            monthly.columns = ["Month", "Value"]
-            st.subheader("📅 Monthly Investments")
-            fig_monthly = go.Figure()
-            fig_monthly.add_trace(go.Bar(
-                x=monthly["Month"],
-                y=monthly["Value"],
-                marker=dict(color="#667eea"),
-                hovertemplate="<b>%{x|%B %Y}</b><br>€%{y:,.2f}<extra></extra>"
-            ))
-            fig_monthly.update_layout(
-                hovermode="x",
-                height=350,
-                xaxis_title="Month",
-                yaxis_title="Invested (€)",
-                template="plotly_white"
+            fig_evolution.update_xaxes(
+                rangeslider=dict(visible=True, thickness=0.07),
+                rangeselector=dict(
+                    buttons=[
+                        dict(count=1, label="1M", step="month", stepmode="backward"),
+                        dict(count=3, label="3M", step="month", stepmode="backward"),
+                        dict(count=6, label="6M", step="month", stepmode="backward"),
+                        dict(count=1, label="YTD", step="year", stepmode="todate"),
+                        dict(count=1, label="1Y", step="year", stepmode="backward"),
+                        dict(step="all", label="All"),
+                    ]
+                ),
+                showspikes=True,
+                spikemode="across",
+                spikesnap="cursor",
+                spikethickness=1,
+                spikecolor="#888888",
             )
-            st.plotly_chart(fig_monthly, width="stretch")
+            fig_evolution.update_yaxes(
+                autorange=True,
+                rangemode="normal",
+                fixedrange=False,
+                showspikes=True,
+                spikemode="across",
+            )
+            
+            st.plotly_chart(
+                fig_evolution,
+                use_container_width=True,
+                config=dict(
+                    scrollZoom=True,
+                    displaylogo=False,
+                    doubleClick="reset",
+                    modeBarButtonsToAdd=[
+                        "drawline",
+                        "eraseshape",
+                        "zoom2d",
+                        "pan2d",
+                        "select2d",
+                        "lasso2d",
+                    ],
+                    toImageButtonOptions=dict(format="png", filename="investment_evolution", height=600, width=1200, scale=2),
+                ),
+            )
         else:
-            st.info("No valid dates for 'Monthly Investments' chart")
+            st.info("No valid dates for investment evolution chart")
     else:
         st.info("No transactions yet")
 
