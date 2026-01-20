@@ -1076,9 +1076,49 @@ def historical_prices():
             yaxis_title="NAV (€)",
             template="plotly_white",
             legend_title="Fund",
+            dragmode="zoom",
+            uirevision="hist_combined",
+            newshape=dict(line_color="#888888"),
         )
-        fig_combined.update_yaxes(autorange=True, rangemode="normal")
-        st.plotly_chart(fig_combined, use_container_width=True)
+        fig_combined.update_xaxes(
+            rangeslider=dict(visible=True, thickness=0.07),
+            rangeselector=dict(
+                buttons=[
+                    dict(count=1, label="1M", step="month", stepmode="backward"),
+                    dict(count=3, label="3M", step="month", stepmode="backward"),
+                    dict(count=6, label="6M", step="month", stepmode="backward"),
+                    dict(count=1, label="YTD", step="year", stepmode="todate"),
+                    dict(count=1, label="1Y", step="year", stepmode="backward"),
+                    dict(count=3, label="3Y", step="year", stepmode="backward"),
+                    dict(step="all", label="All"),
+                ]
+            ),
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikedistance=1000,
+        )
+        fig_combined.update_yaxes(autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
+        st.plotly_chart(
+            fig_combined,
+            use_container_width=True,
+            config=dict(
+                scrollZoom=True,
+                displaylogo=False,
+                doubleClick="reset",
+                modeBarButtonsToAdd=[
+                    "drawline",
+                    "drawrect",
+                    "drawopenpath",
+                    "eraseshape",
+                    "zoom2d",
+                    "pan2d",
+                    "select2d",
+                    "lasso2d",
+                ],
+                toImageButtonOptions=dict(format="png", filename="historical_combined", height=600, width=1000, scale=2),
+            ),
+        )
     else:
         # Grid view: render each fund chart as its own Plotly figure
         if len(selected_funds) > 6:
@@ -1180,10 +1220,50 @@ def historical_prices():
                         template="plotly_white",
                         legend_title="",
                         margin=dict(t=40, b=30, l=10, r=10),
+                        dragmode="zoom",
+                        uirevision=f"hist_{fund}",
+                        newshape=dict(line_color="#888888"),
                     )
-                    fig_fund.update_xaxes(title_text="")
-                    fig_fund.update_yaxes(title_text="NAV (€)", autorange=True, rangemode="normal")
-                    st.plotly_chart(fig_fund, use_container_width=True)
+                    fig_fund.update_xaxes(
+                        title_text="",
+                        rangeslider=dict(visible=True, thickness=0.07),
+                        rangeselector=dict(
+                            buttons=[
+                                dict(count=1, label="1M", step="month", stepmode="backward"),
+                                dict(count=3, label="3M", step="month", stepmode="backward"),
+                                dict(count=6, label="6M", step="month", stepmode="backward"),
+                                dict(count=1, label="YTD", step="year", stepmode="todate"),
+                                dict(count=1, label="1Y", step="year", stepmode="backward"),
+                                dict(count=3, label="3Y", step="year", stepmode="backward"),
+                                dict(step="all", label="All"),
+                            ]
+                        ),
+                        showspikes=True,
+                        spikemode="across",
+                        spikesnap="cursor",
+                        spikedistance=1000,
+                    )
+                    fig_fund.update_yaxes(title_text="NAV (€)", autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
+                    st.plotly_chart(
+                        fig_fund,
+                        use_container_width=True,
+                        config=dict(
+                            scrollZoom=True,
+                            displaylogo=False,
+                            doubleClick="reset",
+                            modeBarButtonsToAdd=[
+                                "drawline",
+                                "drawrect",
+                                "drawopenpath",
+                                "eraseshape",
+                                "zoom2d",
+                                "pan2d",
+                                "select2d",
+                                "lasso2d",
+                            ],
+                            toImageButtonOptions=dict(format="png", filename=f"historical_{fund}", height=600, width=1000, scale=2),
+                        ),
+                    )
 
     # Historical Data Table with colored headers
     st.divider()
