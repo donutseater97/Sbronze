@@ -1265,35 +1265,18 @@ def historical_prices():
                         ),
                     )
 
-                # Unified legend below charts
-                legend_shapes_html = """
-                <div style='margin: 6px 0 4px 0; font-weight:600;'>Legend</div>
-                <div style='display:flex; flex-wrap:wrap; gap:16px; align-items:center;'>
-                    <div>
-                        <span style='display:inline-block;width:22px;height:0;border-top:3px solid #888;vertical-align:middle;margin-right:6px;'></span>
-                        <span>NAV line</span>
-                    </div>
-                    <div>
-                        <span style='display:inline-block;width:22px;height:0;border-top:3px dashed #888;vertical-align:middle;margin-right:6px;'></span>
-                        <span>Average NAV (dashed)</span>
-                    </div>
-                    <div>
-                        <span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#888;margin-right:6px;border:2px solid #fff;vertical-align:middle;'></span>
-                        <span>Transaction</span>
-                    </div>
-                </div>
-                """
-                st.markdown(legend_shapes_html, unsafe_allow_html=True)
-
-                if selected_funds:
-                        fund_legend_html = "<div style='margin-top:4px;'>"
-                        fund_legend_html += "<div style='margin:4px 0 6px 0; font-weight:600;'>Funds</div>"
-                        fund_legend_html += "<div style='display:flex; flex-wrap:wrap; gap:18px; align-items:center;'>"
-                        for f in selected_funds:
-                                color = FUND_COLORS.get(f, "#999999")
-                                fund_legend_html += f"<div><span style='display:inline-block;width:12px;height:12px;border-radius:2px;background:{color};border:1px solid rgba(0,0,0,.3);margin-right:6px;vertical-align:middle;'></span>{f}</div>"
-                        fund_legend_html += "</div></div>"
-                        st.markdown(fund_legend_html, unsafe_allow_html=True)
+    # Single-row unified legend placed under the last chart
+    legend_row_html = "<div style='display:flex; flex-wrap:nowrap; gap:18px; align-items:center; overflow-x:auto; padding:8px 0; border-top:1px solid rgba(150,150,150,.2);'>"
+    # Shapes
+    legend_row_html += "<div><span style='display:inline-block;width:22px;height:0;border-top:3px solid #888;vertical-align:middle;margin-right:6px;'></span>NAV</div>"
+    legend_row_html += "<div><span style='display:inline-block;width:22px;height:0;border-top:3px dashed #888;vertical-align:middle;margin-right:6px;'></span>Avg NAV</div>"
+    legend_row_html += "<div><span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#888;margin-right:6px;border:2px solid #fff;vertical-align:middle;'></span>Transaction</div>"
+    # Fund swatches
+    for f in selected_funds:
+        color = FUND_COLORS.get(f, "#999999")
+        legend_row_html += f"<div><span style='display:inline-block;width:12px;height:12px;border-radius:2px;background:{color};border:1px solid rgba(0,0,0,.3);margin-right:6px;vertical-align:middle;'></span>{f}</div>"
+    legend_row_html += "</div>"
+    st.markdown(legend_row_html, unsafe_allow_html=True)
 
     # Historical Data Table with colored headers
     st.divider()
