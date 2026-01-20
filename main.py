@@ -524,6 +524,14 @@ def overview_and_charts():
                 )])
                 fig_alloc.update_layout(height=450, showlegend=False, hovermode="closest")
                 st.plotly_chart(fig_alloc, use_container_width=True)
+
+                # Legend centered below the allocation chart
+                legend_row_style = "display:flex; justify-content:center; flex-wrap:nowrap; gap:16px; align-items:center; overflow-x:auto; padding:6px 0; border-top:1px solid rgba(150,150,150,.2);"
+                alloc_legend = f"<div style='{legend_row_style}'>" + "".join([
+                    f"<div><span style='display:inline-block;width:12px;height:12px;border-radius:2px;background:{color_map.get(cat, '#999999')};border:1px solid rgba(0,0,0,.35);margin-right:6px;vertical-align:middle;'></span>{cat}</div>"
+                    for cat in alloc["Category"]
+                ]) + "</div>"
+                st.markdown(alloc_legend, unsafe_allow_html=True)
             
             with col_evolution:
                 st.subheader("📈 Investment Evolution")
@@ -607,24 +615,15 @@ def overview_and_charts():
                         toImageButtonOptions=dict(format="png", filename="investment_evolution", height=600, width=1200, scale=2),
                     ),
                 )
-
-            # Horizontal legends below charts (consistent with historical section)
-            legend_row_style = "display:flex; flex-wrap:nowrap; gap:16px; align-items:center; overflow-x:auto; padding:6px 0; border-top:1px solid rgba(150,150,150,.2);"
-            # Allocation legend
-            if 'alloc' in locals() and len(alloc) > 0:
-                alloc_legend = f"<div style='{legend_row_style}'>" + "".join([
-                    f"<div><span style='display:inline-block;width:12px;height:12px;border-radius:2px;background:{color_map.get(cat, '#999999')};border:1px solid rgba(0,0,0,.35);margin-right:6px;vertical-align:middle;'></span>{cat}</div>"
-                    for cat in alloc["Category"]
-                ]) + "</div>"
-                st.markdown(alloc_legend, unsafe_allow_html=True)
-            # Investment evolution legend
-            evo_legend = (
-                f"<div style='{legend_row_style}'>"
-                f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #667eea;vertical-align:middle;margin-right:6px;'></span>Gross Contribution</div>"
-                f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #f093fb;vertical-align:middle;margin-right:6px;'></span>Market Value</div>"
-                f"</div>"
-            )
-            st.markdown(evo_legend, unsafe_allow_html=True)
+                # Legend centered below the investment evolution chart
+                legend_row_style = "display:flex; justify-content:center; flex-wrap:nowrap; gap:16px; align-items:center; overflow-x:auto; padding:6px 0; border-top:1px solid rgba(150,150,150,.2);"
+                evo_legend = (
+                    f"<div style='{legend_row_style}'>"
+                    f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #667eea;vertical-align:middle;margin-right:6px;'></span>Gross Contribution</div>"
+                    f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #f093fb;vertical-align:middle;margin-right:6px;'></span>Market Value</div>"
+                    f"</div>"
+                )
+                st.markdown(evo_legend, unsafe_allow_html=True)
         else:
             st.info("No valid dates for investment evolution chart")
     else:
