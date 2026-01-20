@@ -467,43 +467,46 @@ def overview_and_charts():
         df["date_dt"] = pd.to_datetime(df["Date"], errors="coerce")
         df = df.dropna(subset=["date_dt"])  
         if len(df) > 0:
-            # Build cumulative Gross Contribution (stair-step) and market value evolution
+            # Build cumulative Gross Contribution (theor) and market value evolution
             df_sorted = df.sort_values("date_dt")
-            df_sorted["Gross Contribution"] = df_sorted["Quantity"] * df_sorted["Price (€)"] + df_sorted["Fees (€)"]
-            df_sorted["Cumulative Gross Contribution"] = df_sorted.groupby("Fund")["Gross Contribution"].cumsum().groupby(df_sorted["Fund"]).transform("sum")
+            df_sorted["Gross Contribution (real)"] = df_sorted["Quantity"] * df_sorted["Price (€)"] + df_sorted["Fees (€)"]
+            df_sorted["Gross Contribution (theor)"] = (df_sorted["Gross Contribution (real)"] / 10).round() * 10
             
-            # Get daily cumulative for all funds combined
+            # Get daily cumulative for all funds combined using (theor) values
             daily_data = df_sorted.groupby("date_dt").agg({
-                "Gross Contribution": "sum"
+                "Gross Contribution (theor)": "sum"
             }).reset_index()
-            daily_data["Cumulative Gross Contribution"] = daily_data["Gross Contribution"].cumsum()
+            daily_data["Cumulative Gross Contribution"] = daily_data["Gross Contribution (theor)"].cumsum()
             daily_data = daily_data.sort_values("date_dt")
             
             # Calculate market value over time (requires historical data)
             hist_data = load_historical_prices()
             market_value_by_date = []
-            if len(hist_data) > 0:
-                for date in daily_data["date_dt"]:
-                    # Get all transactions up to this date
-                    tx_up_to_date = df_sorted[df_sorted["date_dt"] <= date]
+            if len(hist_data) > 0 and "date" in hist_data.columns:
+                # Get unique dates from historical data (closest available prices)
+                hist_dates = sorted(hist_data["date"].unique())
+                
+                for hist_date in hist_dates:
+                    # Get all transactions up to this historical date
+                    tx_up_to_date = df_sorted[df_sorted["date_dt"] <= hist_date]
                     if len(tx_up_to_date) == 0:
                         continue
                     
-                    # Get market value as of that date
-                    mv = 0
+                    # Get market value as of that historical date
+                    mv = 0.0
                     for fund in tx_up_to_date["Fund"].unique():
                         fund_tx = tx_up_to_date[tx_up_to_date["Fund"] == fund]
                         qty = fund_tx["Quantity"].sum()
                         
-                        # Find closest historical price on or before date
-                        hist_for_fund = hist_data[hist_data["date"] <= date]
-                        if fund in hist_data.columns and len(hist_for_fund) > 0:
-                            closest_row = hist_for_fund.iloc[-1]
-                            price = closest_row[fund] if pd.notna(closest_row[fund]) else None
-                            if price:
+                        # Get price on exact hist_date
+                        if fund in hist_data.columns:
+                            price_row = hist_data[hist_data["date"] == hist_date][fund]
+                            if len(price_row) > 0 and pd.notna(price_row.iloc[0]):
+                                price = price_row.iloc[0]
                                 mv += qty * price
                     
-                    market_value_by_date.append({"date": date, "market_value": mv})
+                    if mv > 0:
+                        market_value_by_date.append({"date": hist_date, "market_value": mv})
             
             market_value_df = pd.DataFrame(market_value_by_date) if market_value_by_date else pd.DataFrame()
             
