@@ -1004,7 +1004,7 @@ def historical_prices():
         selected_funds = []
 
     # Date range filters + controls
-    col1, col2, col3, col4 = st.columns([2, 2, 1.5, 1.8])
+    col1, col2, col3 = st.columns([2, 2, 1.5])
     with col1:
         min_d = hist_df_display["date"].min().date()
         start_d = st.date_input("Start", value=min_d, key="hist_start_date")
@@ -1016,10 +1016,7 @@ def historical_prices():
         view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
         use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
         st.session_state.hist_view_mode = "combined" if use_combined else "grid"
-    with col4:
-        default_pad = st.session_state.get("hist_y_pad_pct", 5)
-        y_pad_pct = st.slider("Y-axis padding (%)", min_value=0, max_value=50, value=default_pad, step=1, key="hist_y_pad_pct")
-    pad_frac = y_pad_pct / 100 if "y_pad_pct" in locals() else 0.05
+    pad_frac = 0.01
 
     plot_df = hist_df_display[(hist_df_display["date"] >= pd.to_datetime(start_d)) & (hist_df_display["date"] <= pd.to_datetime(end_d))]
     if not selected_funds:
