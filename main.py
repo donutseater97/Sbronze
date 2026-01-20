@@ -1004,7 +1004,7 @@ def historical_prices():
         selected_funds = []
 
     # Date range filters + controls
-    col1, col2, col3, col4 = st.columns([2, 2, 1.3, 1.7])
+    col1, col2, col3 = st.columns([2, 2, 1.5])
     with col1:
         min_d = hist_df_display["date"].min().date()
         start_d = st.date_input("Start", value=min_d, key="hist_start_date")
@@ -1016,36 +1016,12 @@ def historical_prices():
         view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
         use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
         st.session_state.hist_view_mode = "combined" if use_combined else "grid"
-    with col4:
-        st.markdown("**Y-axis scale**")
-        st.session_state.hist_y_scale_mode = st.radio(
-            "Y-axis scale mode",
-            ["Auto", "Manual"],
-            index=0 if st.session_state.get("hist_y_scale_mode", "Auto") == "Auto" else 1,
-            horizontal=True,
-            key="hist_y_scale_mode_radio",
-            label_visibility="collapsed",
-        )
+    # Let Plotly auto-scale y based on current x-range; no manual padding needed
 
     plot_df = hist_df_display[(hist_df_display["date"] >= pd.to_datetime(start_d)) & (hist_df_display["date"] <= pd.to_datetime(end_d))]
     if not selected_funds:
         st.info("Select at least one fund")
         return
-
-    # Determine manual y-range if requested
-    manual_y_range = None
-    if st.session_state.hist_y_scale_mode == "Manual":
-        visible_vals = plot_df[selected_funds].stack().dropna()
-        if len(visible_vals) > 0:
-            default_min = float(visible_vals.min())
-            default_max = float(visible_vals.max())
-        else:
-            default_min, default_max = 0.0, 1.0
-        with col4:
-            y_min_input = st.number_input("Y min", value=default_min, key="hist_y_min", format="%.4f")
-            y_max_input = st.number_input("Y max", value=default_max, key="hist_y_max", format="%.4f")
-        if y_min_input is not None and y_max_input is not None and y_min_input < y_max_input:
-            manual_y_range = [y_min_input, y_max_input]
 
     # Combined view
     if st.session_state.hist_view_mode == "combined":
@@ -1073,13 +1049,10 @@ def historical_prices():
             template="plotly_white",
             legend_title="Fund",
         )
-        if manual_y_range:
-            fig_combined.update_yaxes(range=manual_y_range, autorange=False)
-        else:
-            fig_combined.update_yaxes(autorange=True, rangemode="normal")
+        fig_combined.update_yaxes(autorange=True, rangemode="normal")
         st.plotly_chart(fig_combined, use_container_width=True)
     else:
-        # Grid view with independent hover using subplots
+        # Grid view with synchronized hover using subplots
         from plotly.subplots import make_subplots
         
         if len(selected_funds) > 6:
@@ -1095,8 +1068,8 @@ def historical_prices():
             rows=num_rows,
             cols=cols_per_row,
             subplot_titles=[fund for fund in selected_funds],
-            vertical_spacing=0.16,
-            horizontal_spacing=0.1,
+            vertical_spacing=0.12,
+            horizontal_spacing=0.08,
         )
 
         # Prepare transaction data for markers
@@ -1177,16 +1150,13 @@ def historical_prices():
                         col=col_num,
                     )
                 
-                # Let Plotly auto-scale y on interactions (or apply manual range)
-                if manual_y_range:
-                    fig_grid.update_yaxes(range=manual_y_range, autorange=False, row=row_num, col=col_num)
-                else:
-                    fig_grid.update_yaxes(autorange=True, rangemode="normal", row=row_num, col=col_num)
+                # Let Plotly auto-scale y on interactions
+                fig_grid.update_yaxes(autorange=True, rangemode="normal", row=row_num, col=col_num)
         
         # Update layout for synchronized hover
         fig_grid.update_layout(
             height=300 * num_rows,
-                hovermode="closest",
+            hovermode="x unified",
             template="plotly_white",
             showlegend=False,
         )
