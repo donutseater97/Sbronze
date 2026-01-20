@@ -551,62 +551,62 @@ def overview_and_charts():
                         line=dict(color="#f093fb", width=2.5),
                         hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
                     ))
-            
-            fig_evolution.update_layout(
-                height=400,
-                hovermode="x unified",
-                xaxis_title="",
-                yaxis_title="Value (€)",
-                template="plotly_white",
-                showlegend=True,
-                dragmode="pan",
-                uirevision="overview_evolution",
-                newshape=dict(line_color="#888888"),
-            )
-            fig_evolution.update_xaxes(
-                rangeslider=dict(visible=True, thickness=0.07),
-                rangeselector=dict(
-                    buttons=[
-                        dict(count=1, label="1M", step="month", stepmode="backward"),
-                        dict(count=3, label="3M", step="month", stepmode="backward"),
-                        dict(count=6, label="6M", step="month", stepmode="backward"),
-                        dict(count=1, label="YTD", step="year", stepmode="todate"),
-                        dict(count=1, label="1Y", step="year", stepmode="backward"),
-                        dict(step="all", label="All"),
-                    ]
-                ),
-                showspikes=True,
-                spikemode="across",
-                spikesnap="cursor",
-                spikethickness=1,
-                spikecolor="#888888",
-            )
-            fig_evolution.update_yaxes(
-                autorange=True,
-                rangemode="normal",
-                fixedrange=False,
-                showspikes=True,
-                spikemode="across",
-            )
-            
-            st.plotly_chart(
-                fig_evolution,
-                use_container_width=True,
-                config=dict(
-                    scrollZoom=True,
-                    displaylogo=False,
-                    doubleClick="reset",
-                    modeBarButtonsToAdd=[
-                        "drawline",
-                        "eraseshape",
-                        "zoom2d",
-                        "pan2d",
-                        "select2d",
-                        "lasso2d",
-                    ],
-                    toImageButtonOptions=dict(format="png", filename="investment_evolution", height=600, width=1200, scale=2),
-                ),
-            )
+                
+                fig_evolution.update_layout(
+                    height=400,
+                    hovermode="x unified",
+                    xaxis_title="",
+                    yaxis_title="Value (€)",
+                    template="plotly_white",
+                    showlegend=True,
+                    dragmode="pan",
+                    uirevision="overview_evolution",
+                    newshape=dict(line_color="#888888"),
+                )
+                fig_evolution.update_xaxes(
+                    rangeslider=dict(visible=True, thickness=0.07),
+                    rangeselector=dict(
+                        buttons=[
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="YTD", step="year", stepmode="todate"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ]
+                    ),
+                    showspikes=True,
+                    spikemode="across",
+                    spikesnap="cursor",
+                    spikethickness=1,
+                    spikecolor="#888888",
+                )
+                fig_evolution.update_yaxes(
+                    autorange=True,
+                    rangemode="normal",
+                    fixedrange=False,
+                    showspikes=True,
+                    spikemode="across",
+                )
+                
+                st.plotly_chart(
+                    fig_evolution,
+                    use_container_width=True,
+                    config=dict(
+                        scrollZoom=True,
+                        displaylogo=False,
+                        doubleClick="reset",
+                        modeBarButtonsToAdd=[
+                            "drawline",
+                            "eraseshape",
+                            "zoom2d",
+                            "pan2d",
+                            "select2d",
+                            "lasso2d",
+                        ],
+                        toImageButtonOptions=dict(format="png", filename="investment_evolution", height=600, width=1200, scale=2),
+                    ),
+                )
         else:
             st.info("No valid dates for investment evolution chart")
     else:
