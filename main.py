@@ -1014,6 +1014,41 @@ def active_funds():
 def historical_prices():
     st.header("📈 Historical Data Charts")
     
+    # Helper function to calculate y-axis range with padding
+    def calculate_y_axis_range_with_padding(traces, padding_pct=0.01):
+        """Calculate y-axis range with specified padding percentage."""
+        all_y_values = []
+        for trace in traces:
+            if hasattr(trace, 'y') and trace.y is not None:
+                all_y_values.extend([y for y in trace.y if y is not None])
+        
+        if all_y_values:
+            y_min = min(all_y_values)
+            y_max = max(all_y_values)
+            y_range_size = y_max - y_min
+            padding = y_range_size * padding_pct
+            return y_min - padding, y_max + padding
+        return None, None
+    
+    # Helper function to create price annotation
+    def create_price_annotation(price, fund, x_position=0):
+        """Create a standardized price annotation for a fund."""
+        return dict(
+            x=x_position,
+            y=price,
+            xref="paper",
+            yref="y",
+            text=f"€{price:,.2f}",
+            showarrow=False,
+            xanchor="right",
+            xshift=-5,
+            font=dict(size=9, color=FUND_COLORS.get(fund, "#999999")),
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor=FUND_COLORS.get(fund, "#999999"),
+            borderwidth=1,
+            borderpad=2,
+        )
+    
     # Initialize session state for refresh
     if "force_refresh" not in st.session_state:
         st.session_state.force_refresh = False
@@ -1192,21 +1227,7 @@ def historical_prices():
                 )
         
         # Calculate y-axis range with 1% padding
-        all_y_values = []
-        for trace in fig_combined.data:
-            if hasattr(trace, 'y') and trace.y is not None:
-                all_y_values.extend([y for y in trace.y if y is not None])
-        
-        if all_y_values:
-            y_min = min(all_y_values)
-            y_max = max(all_y_values)
-            y_range_size = y_max - y_min
-            padding = y_range_size * 0.01  # 1% padding
-            y_axis_min = y_min - padding
-            y_axis_max = y_max + padding
-        else:
-            y_axis_min = None
-            y_axis_max = None
+        y_axis_min, y_axis_max = calculate_y_axis_range_with_padding(fig_combined.data)
 
         fig_combined.update_layout(
             height=450,
@@ -1256,21 +1277,7 @@ def historical_prices():
             
             # Add annotations for latest prices on the y-axis
             for fund, price in latest_prices.items():
-                fig_combined.add_annotation(
-                    x=0,
-                    y=price,
-                    xref="paper",
-                    yref="y",
-                    text=f"€{price:,.2f}",
-                    showarrow=False,
-                    xanchor="right",
-                    xshift=-5,
-                    font=dict(size=9, color=FUND_COLORS.get(fund, "#999999")),
-                    bgcolor="rgba(255,255,255,0.8)",
-                    bordercolor=FUND_COLORS.get(fund, "#999999"),
-                    borderwidth=1,
-                    borderpad=2,
-                )
+                fig_combined.add_annotation(**create_price_annotation(price, fund))
         else:
             yaxis_config['autorange'] = True
         
@@ -1397,21 +1404,7 @@ def historical_prices():
                         )
 
                     # Calculate y-axis range with 1% padding
-                    all_y_values = []
-                    for trace in fig_fund.data:
-                        if hasattr(trace, 'y') and trace.y is not None:
-                            all_y_values.extend([y for y in trace.y if y is not None])
-                    
-                    if all_y_values:
-                        y_min = min(all_y_values)
-                        y_max = max(all_y_values)
-                        y_range_size = y_max - y_min
-                        padding = y_range_size * 0.01  # 1% padding
-                        y_axis_min = y_min - padding
-                        y_axis_max = y_max + padding
-                    else:
-                        y_axis_min = None
-                        y_axis_max = None
+                    y_axis_min, y_axis_max = calculate_y_axis_range_with_padding(fig_fund.data)
 
                     fig_fund.update_layout(
                         height=320,
@@ -1470,21 +1463,7 @@ def historical_prices():
                         yaxis_config['autorange'] = False
                         
                         # Add annotation for latest price on the y-axis
-                        fig_fund.add_annotation(
-                            x=0,
-                            y=latest_price,
-                            xref="paper",
-                            yref="y",
-                            text=f"€{latest_price:,.2f}",
-                            showarrow=False,
-                            xanchor="right",
-                            xshift=-5,
-                            font=dict(size=9, color=FUND_COLORS.get(fund, "#999999")),
-                            bgcolor="rgba(255,255,255,0.8)",
-                            bordercolor=FUND_COLORS.get(fund, "#999999"),
-                            borderwidth=1,
-                            borderpad=2,
-                        )
+                        fig_fund.add_annotation(**create_price_annotation(latest_price, fund))
                     else:
                         yaxis_config['autorange'] = True
                     
