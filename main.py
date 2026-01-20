@@ -1307,10 +1307,6 @@ def historical_prices():
             cols_per_row = 2
         else:
             cols_per_row = min(3, len(selected_funds))
-
-        # Initialize session state for synchronized x-axis range in grid view
-        if "grid_xaxis_range" not in st.session_state:
-            st.session_state.grid_xaxis_range = None
         
         # Prepare transaction data for markers (filtered by date range)
         trans_df = transactions.copy()
@@ -1414,11 +1410,14 @@ def historical_prices():
                         showlegend=False,
                         margin=dict(t=40, b=30, l=10, r=10),
                         dragmode="pan",
-                        uirevision=f"hist_grid_sync",  # Use synchronized uirevision for all grid charts
+                        # Use shared uirevision to maintain zoom/pan state across Streamlit reruns
+                        # Note: This doesn't synchronize between different chart instances in real-time
+                        # Users can use range selector buttons to apply consistent time ranges
+                        uirevision=f"hist_grid_sync",
                         newshape=dict(line_color="#888888"),
                     )
                     
-                    # Configure x-axis with synchronized range if available
+                    # Configure x-axis
                     xaxis_config = dict(
                         title_text="",
                         rangeslider=dict(visible=True, thickness=0.07),
@@ -1439,11 +1438,6 @@ def historical_prices():
                         spikethickness=1,
                         spikecolor="#888888",
                     )
-                    
-                    # Apply synchronized x-axis range if it exists
-                    if st.session_state.grid_xaxis_range is not None:
-                        xaxis_config['range'] = st.session_state.grid_xaxis_range
-                        xaxis_config['autorange'] = False
                     
                     fig_fund.update_xaxes(**xaxis_config)
                     
@@ -1472,7 +1466,6 @@ def historical_prices():
                     st.plotly_chart(
                         fig_fund,
                         use_container_width=True,
-                        key=f"plotly_{fund}",  # Unique key for each chart
                         config=dict(
                             scrollZoom=True,
                             displaylogo=False,
