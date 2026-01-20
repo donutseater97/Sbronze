@@ -1118,7 +1118,12 @@ def historical_prices():
     col1, col2, col3 = st.columns([2, 2, 1.5])
     with col1:
         min_d = hist_df_display["date"].min().date()
-        start_d = st.date_input("Start", value=min_d, key="hist_start_date")
+        # Set default start date to October 1, 2024
+        default_start = date(2024, 10, 1)
+        # Use the later of October 1, 2024 or the minimum date in the data
+        if min_d > default_start:
+            default_start = min_d
+        start_d = st.date_input("Start", value=default_start, key="hist_start_date")
     with col2:
         max_d = hist_df_display["date"].max().date()
         end_d = st.date_input("End", value=max_d, key="hist_end_date")
@@ -1127,7 +1132,6 @@ def historical_prices():
         view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
         use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
         st.session_state.hist_view_mode = "combined" if use_combined else "grid"
-    # Let Plotly auto-scale y based on current x-range; no manual padding needed
 
     plot_df = hist_df_display[(hist_df_display["date"] >= pd.to_datetime(start_d)) & (hist_df_display["date"] <= pd.to_datetime(end_d))]
     if not selected_funds:
@@ -1151,10 +1155,17 @@ def historical_prices():
     # Combined view
     if st.session_state.hist_view_mode == "combined":
         fig_combined = go.Figure()
+        latest_prices = {}  # Collect latest prices for each fund
+        
         for fund in selected_funds:
             fund_df = plot_df[["date", fund]].dropna().sort_values("date")
             if len(fund_df) == 0:
                 continue
+            
+            # Get the latest price for this fund
+            latest_price = fund_df[fund].iloc[-1]
+            latest_prices[fund] = latest_price
+            
             fig_combined.add_trace(
                 go.Scatter(
                     x=fund_df["date"],
@@ -1179,6 +1190,23 @@ def historical_prices():
                         showlegend=True,
                     )
                 )
+        
+        # Calculate y-axis range with 1% padding
+        all_y_values = []
+        for trace in fig_combined.data:
+            if hasattr(trace, 'y') and trace.y is not None:
+                all_y_values.extend([y for y in trace.y if y is not None])
+        
+        if all_y_values:
+            y_min = min(all_y_values)
+            y_max = max(all_y_values)
+            y_range_size = y_max - y_min
+            padding = y_range_size * 0.01  # 1% padding
+            y_axis_min = y_min - padding
+            y_axis_max = y_max + padding
+        else:
+            y_axis_min = None
+            y_axis_max = None
 
         fig_combined.update_layout(
             height=450,
@@ -1211,7 +1239,43 @@ def historical_prices():
             spikethickness=1,
             spikecolor="#888888",
         )
-        fig_combined.update_yaxes(autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
+        
+        # Update y-axis with padding
+        yaxis_config = dict(
+            rangemode="normal",
+            fixedrange=False,
+            showspikes=True,
+            spikemode="across",
+            automargin=True,
+        )
+        
+        # Apply calculated range with padding
+        if y_axis_min is not None and y_axis_max is not None:
+            yaxis_config['range'] = [y_axis_min, y_axis_max]
+            yaxis_config['autorange'] = False
+            
+            # Add annotations for latest prices on the y-axis
+            for fund, price in latest_prices.items():
+                fig_combined.add_annotation(
+                    x=0,
+                    y=price,
+                    xref="paper",
+                    yref="y",
+                    text=f"€{price:,.2f}",
+                    showarrow=False,
+                    xanchor="right",
+                    xshift=-5,
+                    font=dict(size=9, color=FUND_COLORS.get(fund, "#999999")),
+                    bgcolor="rgba(255,255,255,0.8)",
+                    bordercolor=FUND_COLORS.get(fund, "#999999"),
+                    borderwidth=1,
+                    borderpad=2,
+                )
+        else:
+            yaxis_config['autorange'] = True
+        
+        fig_combined.update_yaxes(**yaxis_config)
+        
         st.plotly_chart(
             fig_combined,
             use_container_width=True,
@@ -1237,6 +1301,10 @@ def historical_prices():
         else:
             cols_per_row = min(3, len(selected_funds))
 
+        # Initialize session state for synchronized x-axis range in grid view
+        if "grid_xaxis_range" not in st.session_state:
+            st.session_state.grid_xaxis_range = None
+        
         # Prepare transaction data for markers (filtered by date range)
         trans_df = transactions.copy()
         trans_df["Date"] = pd.to_datetime(trans_df["Date"], errors="coerce")
@@ -1253,6 +1321,9 @@ def historical_prices():
                     if len(fund_df) == 0:
                         st.info(f"No data for {fund}")
                         continue
+
+                    # Get the latest price for this fund
+                    latest_price = fund_df[fund].iloc[-1]
 
                     fig_fund = go.Figure()
                     # Price line
@@ -1325,6 +1396,23 @@ def historical_prices():
                             )
                         )
 
+                    # Calculate y-axis range with 1% padding
+                    all_y_values = []
+                    for trace in fig_fund.data:
+                        if hasattr(trace, 'y') and trace.y is not None:
+                            all_y_values.extend([y for y in trace.y if y is not None])
+                    
+                    if all_y_values:
+                        y_min = min(all_y_values)
+                        y_max = max(all_y_values)
+                        y_range_size = y_max - y_min
+                        padding = y_range_size * 0.01  # 1% padding
+                        y_axis_min = y_min - padding
+                        y_axis_max = y_max + padding
+                    else:
+                        y_axis_min = None
+                        y_axis_max = None
+
                     fig_fund.update_layout(
                         height=320,
                         hovermode="x unified",
@@ -1333,10 +1421,12 @@ def historical_prices():
                         showlegend=False,
                         margin=dict(t=40, b=30, l=10, r=10),
                         dragmode="pan",
-                        uirevision=f"hist_{fund}",
+                        uirevision=f"hist_grid_sync",  # Use synchronized uirevision for all grid charts
                         newshape=dict(line_color="#888888"),
                     )
-                    fig_fund.update_xaxes(
+                    
+                    # Configure x-axis with synchronized range if available
+                    xaxis_config = dict(
                         title_text="",
                         rangeslider=dict(visible=True, thickness=0.07),
                         rangeselector=dict(
@@ -1356,10 +1446,54 @@ def historical_prices():
                         spikethickness=1,
                         spikecolor="#888888",
                     )
-                    fig_fund.update_yaxes(title_text="NAV (€)", autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
+                    
+                    # Apply synchronized x-axis range if it exists
+                    if st.session_state.grid_xaxis_range is not None:
+                        xaxis_config['range'] = st.session_state.grid_xaxis_range
+                        xaxis_config['autorange'] = False
+                    
+                    fig_fund.update_xaxes(**xaxis_config)
+                    
+                    # Update y-axis with padding
+                    yaxis_config = dict(
+                        title_text="NAV (€)",
+                        rangemode="normal",
+                        fixedrange=False,
+                        showspikes=True,
+                        spikemode="across",
+                        automargin=True,
+                    )
+                    
+                    # Apply calculated range with padding
+                    if y_axis_min is not None and y_axis_max is not None:
+                        yaxis_config['range'] = [y_axis_min, y_axis_max]
+                        yaxis_config['autorange'] = False
+                        
+                        # Add annotation for latest price on the y-axis
+                        fig_fund.add_annotation(
+                            x=0,
+                            y=latest_price,
+                            xref="paper",
+                            yref="y",
+                            text=f"€{latest_price:,.2f}",
+                            showarrow=False,
+                            xanchor="right",
+                            xshift=-5,
+                            font=dict(size=9, color=FUND_COLORS.get(fund, "#999999")),
+                            bgcolor="rgba(255,255,255,0.8)",
+                            bordercolor=FUND_COLORS.get(fund, "#999999"),
+                            borderwidth=1,
+                            borderpad=2,
+                        )
+                    else:
+                        yaxis_config['autorange'] = True
+                    
+                    fig_fund.update_yaxes(**yaxis_config)
+                    
                     st.plotly_chart(
                         fig_fund,
                         use_container_width=True,
+                        key=f"plotly_{fund}",  # Unique key for each chart
                         config=dict(
                             scrollZoom=True,
                             displaylogo=False,
