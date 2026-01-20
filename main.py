@@ -1026,15 +1026,22 @@ def historical_prices():
             y_min = min(all_y_values)
             y_max = max(all_y_values)
             y_range_size = y_max - y_min
-            padding = y_range_size * padding_pct
+            
+            # Handle edge case where all values are identical
+            if y_range_size == 0:
+                # Use a small percentage of the value itself as padding
+                padding = abs(y_min) * padding_pct if y_min != 0 else 1.0
+            else:
+                padding = y_range_size * padding_pct
+            
             return y_min - padding, y_max + padding
         return None, None
     
     # Helper function to create price annotation
-    def create_price_annotation(price, fund, x_position=0):
+    def create_price_annotation(price, fund):
         """Create a standardized price annotation for a fund."""
         return dict(
-            x=x_position,
+            x=0,
             y=price,
             xref="paper",
             yref="y",
@@ -1410,9 +1417,10 @@ def historical_prices():
                         showlegend=False,
                         margin=dict(t=40, b=30, l=10, r=10),
                         dragmode="pan",
-                        # Use shared uirevision to maintain zoom/pan state across Streamlit reruns
-                        # Note: This doesn't synchronize between different chart instances in real-time
-                        # Users can use range selector buttons to apply consistent time ranges
+                        # Use shared uirevision to maintain zoom/pan state across Streamlit reruns.
+                        # Note: Streamlit + Plotly don't support real-time synchronization between
+                        # different chart instances. Users can manually apply the same time range to
+                        # all charts using the range selector buttons (1M, 3M, 6M, etc.) on each chart.
                         uirevision=f"hist_grid_sync",
                         newshape=dict(line_color="#888888"),
                     )
