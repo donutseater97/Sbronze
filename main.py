@@ -1068,6 +1068,13 @@ def historical_prices():
             subplot_titles=[fund for fund in selected_funds],
             vertical_spacing=0.12,
             horizontal_spacing=0.08,
+            # Prepare transaction data for markers
+            trans_df = transactions.copy()
+            trans_df["Date"] = pd.to_datetime(trans_df["Date"], errors="coerce")
+            trans_df = trans_df.dropna(subset=["Date"])
+            # Filter transactions by date range
+            trans_df = trans_df[(trans_df["Date"] >= pd.to_datetime(start_d)) & (trans_df["Date"] <= pd.to_datetime(end_d))]
+        
         )
         
         # Add traces to subplots
@@ -1079,6 +1086,7 @@ def historical_prices():
             if len(fund_df) > 0:
                 y_min = fund_df[fund].min() * 0.95
                 y_max = fund_df[fund].max() * 1.05
+                                # Add price line
                 
                 fig_grid.add_trace(
                     go.Scatter(
@@ -1092,6 +1100,55 @@ def historical_prices():
                     ),
                     row=row_num,
                     col=col_num,
+                                # Add transaction markers for this fund
+                                fund_trans = trans_df[trans_df["Fund"] == fund]
+                                if len(fund_trans) > 0:
+                                    # Get the NAV price at transaction dates
+                                    trans_prices = []
+                                    trans_dates = []
+                                    hover_texts = []
+                    
+                                    for _, trans_row in fund_trans.iterrows():
+                                        trans_date = trans_row["Date"]
+                                        # Find closest price date
+                                        closest_idx = (fund_df["date"] - trans_date).abs().idxmin()
+                                        trans_price = fund_df.loc[closest_idx, fund]
+                        
+                                        trans_prices.append(trans_price)
+                                        trans_dates.append(trans_date)
+                        
+                                        # Build hover text
+                                        hover_text = (
+                                            f"<b>Transaction</b><br>"
+                                            f"Date: {trans_date.strftime('%Y-%m-%d')}<br>"
+                                            f"Quantity: {trans_row['Quantity']:.3f}<br>"
+                                            f"Price: €{trans_row['Price (€)']:.2f}<br>"
+                                            f"Fees: €{trans_row['Fees (€)']:.2f}<br>"
+                                            f"Total: €{(trans_row['Quantity'] * trans_row['Price (€)'] + trans_row['Fees (€)']):.2f}"
+                                        )
+                                        hover_texts.append(hover_text)
+                    
+                                    # Add markers
+                                    fig_grid.add_trace(
+                                        go.Scatter(
+                                            x=trans_dates,
+                                            y=trans_prices,
+                                            mode="markers",
+                                            name=f"{fund} Transactions",
+                                            marker=dict(
+                                                size=10,
+                                                color=FUND_COLORS.get(fund, "#999999"),
+                                                symbol="circle",
+                                                line=dict(width=2, color="white")
+                                            ),
+                                            hovertemplate="%{text}<extra></extra>",
+                                            text=hover_texts,
+                                            showlegend=False,
+                                        ),
+                                        row=row_num,
+                                        col=col_num,
+                                    )
+                
                 )
                 
                 # Update y-axis range for this subplot
