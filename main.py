@@ -209,7 +209,7 @@ def overview_and_charts():
         summary["Fees (€)"] = summary["Fees (€)"]
         
         # Calculate Average NAV
-        summary["Average NAV (€)"] = summary["Gross Contributions (€)"] / summary["Quantity"]
+        summary["Average NAV (€)"] = (summary["Gross Contributions (€)"] - summary["Fees (€)"]) / summary["Quantity"]
         
         # Get latest price from historical data
         hist_data = load_historical_prices()
