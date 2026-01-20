@@ -1023,6 +1023,20 @@ def historical_prices():
         st.info("Select at least one fund")
         return
 
+    # Compute average NAV per fund within selected date range (transaction history)
+    avg_nav_by_fund = {}
+    tx_range = transactions.copy()
+    tx_range["Date"] = pd.to_datetime(tx_range.get("Date"), errors="coerce")
+    tx_range = tx_range.dropna(subset=["Date"])
+    tx_range = tx_range[(tx_range["Date"] >= pd.to_datetime(start_d)) & (tx_range["Date"] <= pd.to_datetime(end_d))]
+    if len(tx_range) > 0:
+        tx_range["Gross Contribution"] = tx_range["Quantity"] * tx_range["Price (€)"] + tx_range["Fees (€)"]
+        grouped = tx_range.groupby("Fund").agg({"Gross Contribution": "sum", "Quantity": "sum"})
+        for fund, row in grouped.iterrows():
+            qty = row["Quantity"]
+            if qty and qty != 0:
+                avg_nav_by_fund[fund] = row["Gross Contribution"] / qty
+
     # Combined view
     if st.session_state.hist_view_mode == "combined":
         fig_combined = go.Figure()
@@ -1041,6 +1055,20 @@ def historical_prices():
                 )
             )
 
+            # Average NAV line for this fund
+            if fund in avg_nav_by_fund:
+                fig_combined.add_trace(
+                    go.Scatter(
+                        x=[fund_df["date"].min(), fund_df["date"].max()],
+                        y=[avg_nav_by_fund[fund], avg_nav_by_fund[fund]],
+                        mode="lines",
+                        name=f"{fund} Avg NAV",
+                        line=dict(color=FUND_COLORS.get(fund, "#999999"), dash="dash", width=1.5),
+                        hovertemplate=f"<b>{fund} Avg NAV</b><br>€%{{y:,.2f}}<extra></extra>",
+                        showlegend=True,
+                    )
+                )
+
         fig_combined.update_layout(
             height=450,
             hovermode="x unified",
@@ -1052,120 +1080,110 @@ def historical_prices():
         fig_combined.update_yaxes(autorange=True, rangemode="normal")
         st.plotly_chart(fig_combined, use_container_width=True)
     else:
-        # Grid view with synchronized hover using subplots
-        from plotly.subplots import make_subplots
-        
+        # Grid view: render each fund chart as its own Plotly figure
         if len(selected_funds) > 6:
             cols_per_row = 2
         else:
             cols_per_row = min(3, len(selected_funds))
-        
-        # Calculate grid dimensions
-        num_rows = (len(selected_funds) + cols_per_row - 1) // cols_per_row
-        
-        # Create subplots
-        fig_grid = make_subplots(
-            rows=num_rows,
-            cols=cols_per_row,
-            subplot_titles=[fund for fund in selected_funds],
-            vertical_spacing=0.12,
-            horizontal_spacing=0.08,
-        )
 
-        # Prepare transaction data for markers
+        # Prepare transaction data for markers (filtered by date range)
         trans_df = transactions.copy()
         trans_df["Date"] = pd.to_datetime(trans_df["Date"], errors="coerce")
         trans_df = trans_df.dropna(subset=["Date"])
-        # Filter transactions by date range
         trans_df = trans_df[(trans_df["Date"] >= pd.to_datetime(start_d)) & (trans_df["Date"] <= pd.to_datetime(end_d))]
-        
-        # Add traces to subplots
-        for idx, fund in enumerate(selected_funds):
-            row_num = idx // cols_per_row + 1
-            col_num = idx % cols_per_row + 1
-            
-            fund_df = plot_df[["date", fund]].dropna().sort_values("date")
-            if len(fund_df) > 0:
-                # Add price line
-                fig_grid.add_trace(
-                    go.Scatter(
-                        x=fund_df["date"],
-                        y=fund_df[fund],
-                        mode="lines",
-                        name=fund,
-                        line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
-                        hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
-                        showlegend=False,
-                    ),
-                    row=row_num,
-                    col=col_num,
-                )
 
-                # Add transaction markers for this fund
-                fund_trans = trans_df[trans_df["Fund"] == fund]
-                if len(fund_trans) > 0:
-                    # Get the NAV price at transaction dates
-                    trans_prices = []
-                    trans_dates = []
-                    hover_texts = []
+        # Render charts in rows of columns
+        for row_start in range(0, len(selected_funds), cols_per_row):
+            row_funds = selected_funds[row_start : row_start + cols_per_row]
+            cols = st.columns(len(row_funds))
+            for col_slot, fund in zip(cols, row_funds):
+                with col_slot:
+                    fund_df = plot_df[["date", fund]].dropna().sort_values("date")
+                    if len(fund_df) == 0:
+                        st.info(f"No data for {fund}")
+                        continue
 
-                    for _, trans_row in fund_trans.iterrows():
-                        trans_date = trans_row["Date"]
-                        # Find closest price date
-                        closest_idx = (fund_df["date"] - trans_date).abs().idxmin()
-                        trans_price = fund_df.loc[closest_idx, fund]
-
-                        trans_prices.append(trans_price)
-                        trans_dates.append(trans_date)
-
-                        # Build hover text
-                        hover_text = (
-                            f"<b>Transaction</b><br>"
-                            f"Date: {trans_date.strftime('%Y-%m-%d')}<br>"
-                            f"Quantity: {trans_row['Quantity']:.3f}<br>"
-                            f"Price: €{trans_row['Price (€)']:.2f}<br>"
-                            f"Fees: €{trans_row['Fees (€)']:.2f}<br>"
-                            f"Total: €{(trans_row['Quantity'] * trans_row['Price (€)'] + trans_row['Fees (€)']):.2f}"
-                        )
-                        hover_texts.append(hover_text)
-
-                    # Add markers
-                    fig_grid.add_trace(
+                    fig_fund = go.Figure()
+                    # Price line
+                    fig_fund.add_trace(
                         go.Scatter(
-                            x=trans_dates,
-                            y=trans_prices,
-                            mode="markers",
-                            name=f"{fund} Transactions",
-                            marker=dict(
-                                size=10,
-                                color=FUND_COLORS.get(fund, "#999999"),
-                                symbol="circle",
-                                line=dict(width=2, color="white")
-                            ),
-                            hovertemplate="%{text}<extra></extra>",
-                            text=hover_texts,
-                            showlegend=False,
-                        ),
-                        row=row_num,
-                        col=col_num,
+                            x=fund_df["date"],
+                            y=fund_df[fund],
+                            mode="lines",
+                            name=fund,
+                            line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
+                            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+                            showlegend=True,
+                        )
                     )
-                
-                # Let Plotly auto-scale y on interactions
-                fig_grid.update_yaxes(autorange=True, rangemode="normal", row=row_num, col=col_num)
-        
-        # Update layout for synchronized hover
-        fig_grid.update_layout(
-            height=300 * num_rows,
-            hovermode="x unified",
-            template="plotly_white",
-            showlegend=False,
-        )
-        
-        # Update all axes
-        fig_grid.update_xaxes(title_text="")
-        fig_grid.update_yaxes(title_text="NAV (€)")
-        
-        st.plotly_chart(fig_grid, use_container_width=True)
+
+                    # Average NAV line
+                    if fund in avg_nav_by_fund:
+                        fig_fund.add_trace(
+                            go.Scatter(
+                                x=[fund_df["date"].min(), fund_df["date"].max()],
+                                y=[avg_nav_by_fund[fund], avg_nav_by_fund[fund]],
+                                mode="lines",
+                                name=f"{fund} Avg NAV",
+                                line=dict(color=FUND_COLORS.get(fund, "#999999"), dash="dash", width=1.5),
+                                hovertemplate=f"<b>{fund} Avg NAV</b><br>€%{{y:,.2f}}<extra></extra>",
+                                showlegend=True,
+                            )
+                        )
+
+                    # Transaction markers
+                    fund_trans = trans_df[trans_df["Fund"] == fund]
+                    if len(fund_trans) > 0:
+                        trans_prices = []
+                        trans_dates = []
+                        hover_texts = []
+
+                        for _, trans_row in fund_trans.iterrows():
+                            trans_date = trans_row["Date"]
+                            closest_idx = (fund_df["date"] - trans_date).abs().idxmin()
+                            trans_price = fund_df.loc[closest_idx, fund]
+
+                            trans_prices.append(trans_price)
+                            trans_dates.append(trans_date)
+
+                            hover_text = (
+                                f"<b>Transaction</b><br>"
+                                f"Date: {trans_date.strftime('%Y-%m-%d')}<br>"
+                                f"Quantity: {trans_row['Quantity']:.3f}<br>"
+                                f"Price: €{trans_row['Price (€)']:.2f}<br>"
+                                f"Fees: €{trans_row['Fees (€)']:.2f}<br>"
+                                f"Total: €{(trans_row['Quantity'] * trans_row['Price (€)'] + trans_row['Fees (€)']):.2f}"
+                            )
+                            hover_texts.append(hover_text)
+
+                        fig_fund.add_trace(
+                            go.Scatter(
+                                x=trans_dates,
+                                y=trans_prices,
+                                mode="markers",
+                                name=f"{fund} Transactions",
+                                marker=dict(
+                                    size=10,
+                                    color=FUND_COLORS.get(fund, "#999999"),
+                                    symbol="circle",
+                                    line=dict(width=2, color="white")
+                                ),
+                                hovertemplate="%{text}<extra></extra>",
+                                text=hover_texts,
+                                showlegend=True,
+                            )
+                        )
+
+                    fig_fund.update_layout(
+                        height=320,
+                        hovermode="x unified",
+                        template="plotly_white",
+                        legend_title="",
+                        margin=dict(t=40, b=30, l=10, r=10),
+                    )
+                    fig_fund.update_xaxes(title_text="")
+                    fig_fund.update_yaxes(title_text="NAV (€)", autorange=True, rangemode="normal")
+                    st.plotly_chart(fig_fund, use_container_width=True)
 
     # Historical Data Table with colored headers
     st.divider()
