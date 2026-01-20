@@ -1076,6 +1076,7 @@ def historical_prices():
             yaxis_title="NAV (€)",
             template="plotly_white",
             legend_title="Fund",
+            showlegend=False,
             dragmode="zoom",
             uirevision="hist_combined",
             newshape=dict(line_color="#888888"),
@@ -1152,7 +1153,7 @@ def historical_prices():
                             name=fund,
                             line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
                             hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
-                            showlegend=True,
+                            showlegend=False,
                         )
                     )
 
@@ -1166,7 +1167,7 @@ def historical_prices():
                                 name=f"{fund} Avg NAV",
                                 line=dict(color=FUND_COLORS.get(fund, "#999999"), dash="dash", width=1.5),
                                 hovertemplate=f"<b>{fund} Avg NAV</b><br>€%{{y:,.2f}}<extra></extra>",
-                                showlegend=True,
+                                showlegend=False,
                             )
                         )
 
@@ -1209,7 +1210,7 @@ def historical_prices():
                                 ),
                                 hovertemplate="%{text}<extra></extra>",
                                 text=hover_texts,
-                                showlegend=True,
+                                showlegend=False,
                             )
                         )
 
@@ -1218,6 +1219,7 @@ def historical_prices():
                         hovermode="x unified",
                         template="plotly_white",
                         legend_title="",
+                        showlegend=False,
                         margin=dict(t=40, b=30, l=10, r=10),
                         dragmode="zoom",
                         uirevision=f"hist_{fund}",
@@ -1262,6 +1264,36 @@ def historical_prices():
                             toImageButtonOptions=dict(format="png", filename=f"historical_{fund}", height=600, width=1000, scale=2),
                         ),
                     )
+
+                # Unified legend below charts
+                legend_shapes_html = """
+                <div style='margin: 6px 0 4px 0; font-weight:600;'>Legend</div>
+                <div style='display:flex; flex-wrap:wrap; gap:16px; align-items:center;'>
+                    <div>
+                        <span style='display:inline-block;width:22px;height:0;border-top:3px solid #888;vertical-align:middle;margin-right:6px;'></span>
+                        <span>NAV line</span>
+                    </div>
+                    <div>
+                        <span style='display:inline-block;width:22px;height:0;border-top:3px dashed #888;vertical-align:middle;margin-right:6px;'></span>
+                        <span>Average NAV (dashed)</span>
+                    </div>
+                    <div>
+                        <span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#888;margin-right:6px;border:2px solid #fff;vertical-align:middle;'></span>
+                        <span>Transaction</span>
+                    </div>
+                </div>
+                """
+                st.markdown(legend_shapes_html, unsafe_allow_html=True)
+
+                if selected_funds:
+                        fund_legend_html = "<div style='margin-top:4px;'>"
+                        fund_legend_html += "<div style='margin:4px 0 6px 0; font-weight:600;'>Funds</div>"
+                        fund_legend_html += "<div style='display:flex; flex-wrap:wrap; gap:18px; align-items:center;'>"
+                        for f in selected_funds:
+                                color = FUND_COLORS.get(f, "#999999")
+                                fund_legend_html += f"<div><span style='display:inline-block;width:12px;height:12px;border-radius:2px;background:{color};border:1px solid rgba(0,0,0,.3);margin-right:6px;vertical-align:middle;'></span>{f}</div>"
+                        fund_legend_html += "</div></div>"
+                        st.markdown(fund_legend_html, unsafe_allow_html=True)
 
     # Historical Data Table with colored headers
     st.divider()
