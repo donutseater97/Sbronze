@@ -1096,7 +1096,8 @@ def historical_prices():
             showspikes=True,
             spikemode="across",
             spikesnap="cursor",
-            spikedistance=1000,
+            spikethickness=1,
+            spikecolor="#888888",
         )
         fig_combined.update_yaxes(autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
         st.plotly_chart(
@@ -1241,7 +1242,8 @@ def historical_prices():
                         showspikes=True,
                         spikemode="across",
                         spikesnap="cursor",
-                        spikedistance=1000,
+                        spikethickness=1,
+                        spikecolor="#888888",
                     )
                     fig_fund.update_yaxes(title_text="NAV (€)", autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
                     st.plotly_chart(
