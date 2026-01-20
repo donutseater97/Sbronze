@@ -1077,7 +1077,7 @@ def historical_prices():
             template="plotly_white",
             legend_title="Fund",
             showlegend=False,
-            dragmode="zoom",
+            dragmode="pan",
             uirevision="hist_combined",
             newshape=dict(line_color="#888888"),
         )
@@ -1221,7 +1221,7 @@ def historical_prices():
                         legend_title="",
                         showlegend=False,
                         margin=dict(t=40, b=30, l=10, r=10),
-                        dragmode="zoom",
+                        dragmode="pan",
                         uirevision=f"hist_{fund}",
                         newshape=dict(line_color="#888888"),
                     )
