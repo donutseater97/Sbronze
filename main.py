@@ -1004,7 +1004,7 @@ def historical_prices():
         selected_funds = []
 
     # Date range filters + controls
-    col1, col2, col3 = st.columns([2, 2, 1.5])
+    col1, col2, col3, col4 = st.columns([2, 2, 1.5, 1.8])
     with col1:
         min_d = hist_df_display["date"].min().date()
         start_d = st.date_input("Start", value=min_d, key="hist_start_date")
@@ -1016,6 +1016,10 @@ def historical_prices():
         view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
         use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
         st.session_state.hist_view_mode = "combined" if use_combined else "grid"
+    with col4:
+        default_pad = st.session_state.get("hist_y_pad_pct", 5)
+        y_pad_pct = st.slider("Y-axis padding (%)", min_value=0, max_value=50, value=default_pad, step=1, key="hist_y_pad_pct")
+    pad_frac = y_pad_pct / 100 if "y_pad_pct" in locals() else 0.05
 
     plot_df = hist_df_display[(hist_df_display["date"] >= pd.to_datetime(start_d)) & (hist_df_display["date"] <= pd.to_datetime(end_d))]
     if not selected_funds:
@@ -1040,6 +1044,21 @@ def historical_prices():
                 )
             )
 
+        # Apply padded y-axis range across all selected funds
+        try:
+            stacked_vals = plot_df[selected_funds].stack().dropna()
+            if len(stacked_vals) > 0:
+                ymin_raw = stacked_vals.min()
+                ymax_raw = stacked_vals.max()
+                span = ymax_raw - ymin_raw
+                pad_val = span * pad_frac if span > 0 else abs(ymax_raw) * pad_frac
+                ymin = ymin_raw - pad_val
+                ymax = ymax_raw + pad_val
+            else:
+                ymin, ymax = None, None
+        except Exception:
+            ymin, ymax = None, None
+
         fig_combined.update_layout(
             height=450,
             hovermode="x unified",
@@ -1047,6 +1066,7 @@ def historical_prices():
             yaxis_title="NAV (€)",
             template="plotly_white",
             legend_title="Fund",
+            yaxis=dict(range=[ymin, ymax]) if ymin is not None and ymax is not None else None,
         )
         st.plotly_chart(fig_combined, use_container_width=True)
     else:
@@ -1084,8 +1104,12 @@ def historical_prices():
             
             fund_df = plot_df[["date", fund]].dropna().sort_values("date")
             if len(fund_df) > 0:
-                y_min = fund_df[fund].min() * 0.95
-                y_max = fund_df[fund].max() * 1.05
+                min_val = fund_df[fund].min()
+                max_val = fund_df[fund].max()
+                span = max_val - min_val
+                pad_val = span * pad_frac if span > 0 else abs(max_val) * pad_frac
+                y_min = min_val - pad_val
+                y_max = max_val + pad_val
                 # Add price line
                 fig_grid.add_trace(
                     go.Scatter(
