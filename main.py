@@ -431,38 +431,6 @@ def overview_and_charts():
     if len(transactions) > 0:
         df = transactions.copy()
         df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
-        
-        # Allocation chart with Fund/Type dropdown
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.subheader("💰 Allocation")
-        with col2:
-            alloc_by = st.selectbox("Group by:", ["Fund", "Type"], key="alloc_selectbox")
-        
-        if alloc_by == "Fund":
-            alloc = df.groupby("Fund")["invested"].sum().reset_index()
-            alloc = alloc.sort_values("invested", ascending=False)
-            alloc.columns = ["Category", "Value"]
-            color_map = {cat: FUND_COLORS.get(cat, "#999999") for cat in alloc["Category"]}
-        else:  # Type
-            alloc = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
-            alloc = alloc.groupby("Type")["invested"].sum().reset_index()
-            alloc = alloc.sort_values("invested", ascending=False)
-            alloc.columns = ["Category", "Value"]
-            color_map = {
-                "Bond": "#1f77b4", "Equity": "#ff7f0e", "Mixed": "#2ca02c", 
-                "Commodity": "#d62728", "Alternative": "#9467bd", "Other": "#8c564b"
-            }
-        
-        fig_alloc = go.Figure(data=[go.Pie(
-            labels=alloc["Category"],
-            values=alloc["Value"],
-            hole=0.4,
-            marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc["Category"]]),
-            hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
-        )])
-        fig_alloc.update_layout(height=450, showlegend=True, hovermode="closest")
-        st.plotly_chart(fig_alloc, width="stretch")
 
         df["date_dt"] = pd.to_datetime(df["Date"], errors="coerce")
         df = df.dropna(subset=["date_dt"])  
@@ -476,8 +444,23 @@ def overview_and_charts():
             daily_data = df_sorted.groupby("date_dt").agg({
                 "Gross Contribution (theor)": "sum"
             }).reset_index()
-            daily_data["Cumulative Gross Contribution"] = daily_data["Gross Contribution (theor)"].cumsum()
+            daily_data["Gross Contribution"] = daily_data["Gross Contribution (theor)"].cumsum()
             daily_data = daily_data.sort_values("date_dt")
+            
+            # Create stair-step data: add points before and after each contribution to create flat line effect
+            stair_dates = []
+            stair_values = []
+            for idx, row in daily_data.iterrows():
+                if idx > 0:
+                    # Add point just before this contribution (at previous value)
+                    prev_value = daily_data.iloc[idx - 1]["Gross Contribution"]
+                    stair_dates.append(row["date_dt"])
+                    stair_values.append(prev_value)
+                # Add point at contribution
+                stair_dates.append(row["date_dt"])
+                stair_values.append(row["Gross Contribution"])
+            
+            stair_df = pd.DataFrame({"date_dt": stair_dates, "Gross Contribution": stair_values})
             
             # Calculate market value over time (requires historical data)
             hist_data = load_historical_prices()
@@ -510,31 +493,64 @@ def overview_and_charts():
             
             market_value_df = pd.DataFrame(market_value_by_date) if market_value_by_date else pd.DataFrame()
             
-            st.subheader("📈 Investment Evolution")
-            fig_evolution = go.Figure()
+            # Create side-by-side layout
+            col_pie, col_evolution = st.columns([1, 1.2])
             
-            # Stair-step cumulative gross contribution
-            fig_evolution.add_trace(go.Scatter(
-                x=daily_data["date_dt"],
-                y=daily_data["Cumulative Gross Contribution"],
-                mode="lines",
-                name="Cumulative Gross Contribution",
-                line=dict(color="#667eea", width=2.5),
-                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
-                fill="tozeroy",
-                fillcolor="rgba(102, 126, 234, 0.1)",
-            ))
+            with col_pie:
+                st.subheader("💰 Allocation")
+                alloc_by = st.selectbox("Group by:", ["Fund", "Type"], key="alloc_selectbox")
+                
+                if alloc_by == "Fund":
+                    alloc = df.groupby("Fund")["invested"].sum().reset_index()
+                    alloc = alloc.sort_values("invested", ascending=False)
+                    alloc.columns = ["Category", "Value"]
+                    color_map = {cat: FUND_COLORS.get(cat, "#999999") for cat in alloc["Category"]}
+                else:  # Type
+                    alloc = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
+                    alloc = alloc.groupby("Type")["invested"].sum().reset_index()
+                    alloc = alloc.sort_values("invested", ascending=False)
+                    alloc.columns = ["Category", "Value"]
+                    color_map = {
+                        "Bond": "#1f77b4", "Equity": "#ff7f0e", "Mixed": "#2ca02c", 
+                        "Commodity": "#d62728", "Alternative": "#9467bd", "Other": "#8c564b"
+                    }
+                
+                fig_alloc = go.Figure(data=[go.Pie(
+                    labels=alloc["Category"],
+                    values=alloc["Value"],
+                    hole=0.4,
+                    marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc["Category"]]),
+                    hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
+                )])
+                fig_alloc.update_layout(height=450, showlegend=True, hovermode="closest")
+                st.plotly_chart(fig_alloc, use_container_width=True)
             
-            # Market value overlay
-            if len(market_value_df) > 0:
+            with col_evolution:
+                st.subheader("📈 Investment Evolution")
+                fig_evolution = go.Figure()
+                
+                # Stair-step gross contribution with always-visible hover
                 fig_evolution.add_trace(go.Scatter(
-                    x=market_value_df["date"],
-                    y=market_value_df["market_value"],
+                    x=stair_df["date_dt"],
+                    y=stair_df["Gross Contribution"],
                     mode="lines",
-                    name="Market Value",
-                    line=dict(color="#f093fb", width=2.5),
+                    name="Gross Contribution",
+                    line=dict(color="#667eea", width=2.5),
                     hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+                    fill="tozeroy",
+                    fillcolor="rgba(102, 126, 234, 0.1)",
                 ))
+                
+                # Market value overlay
+                if len(market_value_df) > 0:
+                    fig_evolution.add_trace(go.Scatter(
+                        x=market_value_df["date"],
+                        y=market_value_df["market_value"],
+                        mode="lines",
+                        name="Market Value",
+                        line=dict(color="#f093fb", width=2.5),
+                        hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+                    ))
             
             fig_evolution.update_layout(
                 height=400,
