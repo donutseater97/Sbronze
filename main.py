@@ -1109,8 +1109,6 @@ def historical_prices():
                 doubleClick="reset",
                 modeBarButtonsToAdd=[
                     "drawline",
-                    "drawrect",
-                    "drawopenpath",
                     "eraseshape",
                     "zoom2d",
                     "pan2d",
@@ -1255,8 +1253,6 @@ def historical_prices():
                             doubleClick="reset",
                             modeBarButtonsToAdd=[
                                 "drawline",
-                                "drawrect",
-                                "drawopenpath",
                                 "eraseshape",
                                 "zoom2d",
                                 "pan2d",
