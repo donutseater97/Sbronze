@@ -553,7 +553,7 @@ def overview_and_charts():
                     ))
                 
                 fig_evolution.update_layout(
-                    height=400,
+                    height=520,
                     hovermode="x unified",
                     xaxis_title="",
                     yaxis_title="Value (€)",
