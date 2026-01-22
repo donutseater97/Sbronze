@@ -1,51 +1,134 @@
-import yfinance as yf         # Import the yfinance library to get financial data
-import pandas as pd           # Import pandas for working with tables (dataframes)
+from investgo import get_pair_id, get_historical_prices, get_info
+import requests
+import pandas as pd
+from datetime import datetime
+from io import BytesIO
+import warnings
 
-# Load tickers dynamically from funds.csv and append .F suffix; keep mapping to Fund names
+warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
+
+# Load funds configuration
 funds = pd.read_csv("funds.csv")
-fund_map = {row["Ticker"]: row["Fund"] for _, row in funds.iterrows() if pd.notna(row["Ticker"])}
-tickers = [f"{t}.F" for t in fund_map.keys()]
+
+# Separate Me A Ee from the rest
+meaee_fund = funds[funds["Fund"] == "Me A Ee"].iloc[0]
+investgo_funds = funds[funds["Fund"] != "Me A Ee"]
 
 dfs = []
-for ticker in tickers:
+
+# 1. Fetch data for first 5 funds using investgo
+print("Fetching data from investgo...")
+tickers = investgo_funds["Ticker"].tolist()
+ticker_to_fund = dict(zip(investgo_funds["Ticker"], investgo_funds["Fund"]))
+
+# Pair IDs for all tickers
+pair_ids = {t: get_pair_id([t])[0] for t in tickers}
+
+start_date = "01011990"  # earliest reasonable default
+end_date = datetime.now().strftime("%d%m%Y")
+
+for ticker, pair_id in pair_ids.items():
+    fund_name = ticker_to_fund[ticker]
     try:
-        fund = yf.Ticker(ticker)
-        df = fund.history(period="100y", interval="1d").reset_index()[["Date", "Open"]]
-        # Normalize date to Europe/Rome timezone, then to naive
-        df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_convert('Europe/Rome').dt.tz_localize(None)
-        df = df.rename(columns={"Open": ticker})
-        dfs.append(df)
+        hist_raw = get_historical_prices(pair_id, start_date, end_date)
+        hist = hist_raw.reset_index()
+
+        # Keep only date and close price
+        hist = hist.rename(columns={"date": "Date", "price": fund_name})[["Date", fund_name]]
+
+        # Convert Date to Europe/Rome tz-naive
+        dt = pd.to_datetime(hist["Date"], errors="coerce")
+        dt = dt.dt.tz_localize("Europe/Rome").dt.tz_localize(None)
+        hist["Date"] = dt
+
+        hist[fund_name] = pd.to_numeric(hist[fund_name], errors="coerce").round(2)
+        dfs.append(hist)
+        print(f"✓ {fund_name}: {len(hist)} rows")
     except Exception as e:
-        print(f"WARN: failed to fetch {ticker}: {e}")
+        print(f"✗ {fund_name}: {e}")
 
-table = dfs[0]                # Start with the first dataframe
+# 2. Fetch Me A Ee data from JPMorgan API
+print("\nFetching Me A Ee from JPMorgan API...")
+try:
+    isin = meaee_fund["ISIN"]
+    base_url = "https://am.jpmorgan.com/FundsMarketingHandler/excel"
+    params = {
+        "type": "historicalNav",
+        "cusip": isin,
+        "country": "it",
+        "role": "adv",
+        "locale": "it-IT",
+        "fromDate": "2023-01-01",
+        "toDate": datetime.now().strftime("%Y-%m-%d")
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+    
+    response = requests.get(base_url, params=params, headers=headers)
+    response.raise_for_status()
+    
+    # Parse Excel response
+    excel_file = BytesIO(response.content)
+    df_raw = pd.read_excel(excel_file)
+    
+    # Clean data: skip header rows
+    df = df_raw.iloc[4:].copy()
+    df.columns = ['Date', 'Me A Ee']
+    df = df.dropna()
+    
+    # Convert Date and NAV
+    df['Date'] = pd.to_datetime(df['Date'], format='%d.%m.%Y')
+    df['Me A Ee'] = pd.to_numeric(df['Me A Ee'], errors='coerce').round(2)
+    
+    # Convert to Europe/Rome timezone
+    df['Date'] = df['Date'].dt.tz_localize('Europe/Rome').dt.tz_localize(None)
+    
+    dfs.append(df)
+    print(f"✓ Me A Ee: {len(df)} rows")
+except Exception as e:
+    print(f"✗ Me A Ee: {e}")
 
-for df in dfs[1:]:            # Loop through the rest of the dataframes
-    table = pd.merge(table, df, on="Date", how="outer")  # Merge them together by 'Date'
+# 3. Merge all dataframes
+print("\nMerging data...")
+if dfs:
+    merged_table = dfs[0]
+    for df in dfs[1:]:
+        merged_table = pd.merge(merged_table, df, on="Date", how="outer")
+    
+    merged_table = merged_table.sort_values("Date", ascending=True).reset_index(drop=True)
 
-table = table.sort_values("Date").reset_index(drop=True)
+    fund_columns = [col for col in merged_table.columns if col != "Date"]
+    for fund_column in fund_columns:
+        merged_table[fund_column] = merged_table[fund_column].astype(object)
+        series = merged_table[fund_column]
+        first_valid_idx = series.first_valid_index()
+        if first_valid_idx is None:
+            merged_table[fund_column] = "-"
+            continue
+        merged_table.loc[: first_valid_idx - 1, fund_column] = "-"
+        obj_series = pd.Series(series.values, dtype=object)
+        filled_values = []
+        last_seen = None
+        for value in obj_series:
+            is_missing = value is None or (isinstance(value, float) and pd.isna(value))
+            if is_missing:
+                filled_values.append(last_seen if last_seen is not None else value)
+            else:
+                last_seen = value
+                filled_values.append(value)
+        merged_table[fund_column] = pd.Series(filled_values, dtype=object)
 
-# Forward-fill within each series; NaNs before first value remain NaN
-for col in table.columns:
-    if col != "Date":
-        table[col] = table[col].ffill()
+    merged_table = merged_table.sort_values("Date", ascending=False).reset_index(drop=True)
 
-# Round numeric columns to 2 decimals and format Date column
-num_cols = [c for c in table.columns if c != "Date"]
-table[num_cols] = table[num_cols].round(2)
-table["Date"] = table["Date"].dt.strftime("%Y-%m-%d")
-
-table = table.sort_values("Date", ascending=False).reset_index(drop=True)
-
-# Rename columns from ticker symbols to fund names
-rename_map = {}
-for ticker in fund_map.keys():
-    ticker_col = f"{ticker}.F"
-    if ticker_col in table.columns:
-        rename_map[ticker_col] = fund_map[ticker]
-table = table.rename(columns=rename_map)
-
-# Save the table to CSV
-table.to_csv("historical_data.csv", index=False)
-
-print("Saved historical_data.csv with", len(table), "rows and", len(table.columns), "columns")
+    merged_table["Date"] = pd.to_datetime(merged_table["Date"]).dt.strftime("%Y-%m-%d")
+    
+    desired_order = ["Date"] + funds["Fund"].tolist()
+    available_cols = ["Date"] + [col for col in funds["Fund"].tolist() if col in merged_table.columns]
+    merged_table = merged_table[available_cols]
+    
+    merged_table.to_csv("latest_historical_data.csv", index=False)
+    print(f"\n✓ Saved latest_historical_data.csv with {len(merged_table)} rows and {len(merged_table.columns)} columns")
+else:
+    print("✗ No data fetched")
