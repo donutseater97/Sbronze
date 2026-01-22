@@ -1,12 +1,12 @@
-name: Update Historical Data (Investgo + JPMorgan)
+name: Update Backup Historical Data (YFinance)
 
 on:
   push:
     paths:
       - 'funds.csv'
-      - '.github/workflows/update-historical-data.yml'
+      - '.github/workflows/update-backup-historical-data.yml'
   schedule:
-    - cron: '0 23 * * *' # Daily at 11:00 PM UTC = midnight Rome time
+    - cron: '0 0 * * 0' # Weekly on Sunday at midnight UTC
   workflow_dispatch: {}
 
 permissions:
@@ -40,14 +40,14 @@ jobs:
         run: |
           git pull --rebase origin main
 
-      - name: Generate historical data CSV
+      - name: Generate backup historical data CSV
         run: |
-          python get_historical_data.py
+          python get_backup_historical_data.py
 
-      - name: Commit updated historical_data.csv
+      - name: Commit updated backup_historical_data.csv
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'Auto-update historical_data.csv'
-          file_pattern: 'historical_data.csv'
+          commit_message: 'Auto-update backup_historical_data.csv (YFinance)'
+          file_pattern: 'backup_historical_data.csv'
         env:
           GITHUB_TOKEN: ${{ secrets.ACTIONS_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
