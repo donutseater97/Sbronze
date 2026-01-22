@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'funds.csv'
+      - 'get_historical_data.py'
+      - 'requirements.txt'
       - '.github/workflows/update-historical-data.yml'
   schedule:
     - cron: '0 23 * * *' # Daily at 11:00 PM UTC = midnight Rome time
