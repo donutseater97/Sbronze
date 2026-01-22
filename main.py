@@ -247,10 +247,9 @@ def overview_and_charts():
             return f"{rounded:.{dp}f}".rstrip('0').rstrip('.')
         
         # Store numeric quantity before formatting for calculation (make explicit copy)
-        qty_numeric_values = summary["Quantity"].astype(float).values.copy()
-        summary["Quantity"] = summary.apply(format_qty_overview, axis=1)
+        qty_numeric = summary["Quantity"].astype(float).copy()
         
-        # Get latest price and calculate Market Value
+        # Get latest price and calculate Market Value (before formatting Quantity)
         if len(hist_data) > 0 and "date" in hist_data.columns:
             latest_date = pd.to_datetime(hist_data["date"]).max()
             latest_prices = {}
@@ -260,14 +259,14 @@ def overview_and_charts():
                     if len(price_vals) > 0 and pd.notna(price_vals[0]):
                         latest_prices[fund] = price_vals[0]
             summary["Latest Price (€)"] = summary["Fund"].map(latest_prices)
-            # Use numeric quantity for calculation
-            summary["Market Value (€)"] = summary.apply(
-                lambda row: qty_numeric_values[row.name] * row["Latest Price (€)"] if pd.notna(row["Latest Price (€)"]) else 0,
-                axis=1
-            )
+            # Calculate Market Value with numeric quantities before formatting
+            summary["Market Value (€)"] = qty_numeric * summary["Latest Price (€)"].fillna(0.0)
         else:
             summary["Latest Price (€)"] = 0.0
             summary["Market Value (€)"] = 0.0
+        
+        # Now format Quantity for display
+        summary["Quantity"] = summary.apply(format_qty_overview, axis=1)
         
         # Calculate Total Return [€ (%)]
         summary["Total Return (€)"] = summary["Market Value (€)"] - summary["Gross Contributions (€)"]
