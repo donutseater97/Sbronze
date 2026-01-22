@@ -4,3 +4,4 @@ yfinance
 plotly
 requests
 altair
+investgo
