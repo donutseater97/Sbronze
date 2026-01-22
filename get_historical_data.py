@@ -59,7 +59,7 @@ try:
         "country": "it",
         "role": "adv",
         "locale": "it-IT",
-        "fromDate": "2023-01-01",
+        "fromDate": "1990-01-01",
         "toDate": datetime.now().strftime("%Y-%m-%d")
     }
     headers = {
