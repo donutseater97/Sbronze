@@ -107,9 +107,9 @@ def load_historical_prices():
     if "Date" in df.columns:
         df = df.rename(columns={"Date": "date"})
 
-    # Ensure date column is tz-naive datetime
+    # Date column is already tz-naive from get_historical_data.py (converted to Europe/Rome)
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.tz_localize(None)
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
     # Map ticker columns to fund names (e.g., 0P0001CRXW.F -> US)
     for _, row in funds.iterrows():

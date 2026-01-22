@@ -11,8 +11,8 @@ for ticker in tickers:
     try:
         fund = yf.Ticker(ticker)
         df = fund.history(period="100y", interval="1d").reset_index()[["Date", "Open"]]
-        # Normalize date to naive and keep daily resolution
-        df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_localize(None)
+        # Normalize date to Europe/Rome timezone, then to naive
+        df["Date"] = pd.to_datetime(df["Date"], utc=True).dt.tz_convert('Europe/Rome').dt.tz_localize(None)
         df = df.rename(columns={"Open": ticker})
         dfs.append(df)
     except Exception as e:
