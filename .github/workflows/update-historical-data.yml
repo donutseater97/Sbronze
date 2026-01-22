@@ -6,7 +6,7 @@ on:
       - 'funds.csv'
       - '.github/workflows/update-historical-data.yml'
   schedule:
-    - cron: '0 5 * * *' # Daily at 05:00 UTC
+    - cron: '0 23 * * *' # Daily at 11:00 PM UTC = midnight Rome time
   workflow_dispatch: {}
 
 permissions:
