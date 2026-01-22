@@ -246,8 +246,8 @@ def overview_and_charts():
                 return str(int(rounded))
             return f"{rounded:.{dp}f}".rstrip('0').rstrip('.')
         
-        # Store numeric quantity before formatting for calculation
-        summary["Quantity_Numeric"] = summary["Quantity"]
+        # Store numeric quantity before formatting for calculation (make explicit copy)
+        qty_numeric_values = summary["Quantity"].astype(float).values.copy()
         summary["Quantity"] = summary.apply(format_qty_overview, axis=1)
         
         # Get latest price and calculate Market Value
@@ -262,7 +262,7 @@ def overview_and_charts():
             summary["Latest Price (€)"] = summary["Fund"].map(latest_prices)
             # Use numeric quantity for calculation
             summary["Market Value (€)"] = summary.apply(
-                lambda row: row["Quantity_Numeric"] * row["Latest Price (€)"] if pd.notna(row["Latest Price (€)"]) else 0,
+                lambda row: qty_numeric_values[row.name] * row["Latest Price (€)"] if pd.notna(row["Latest Price (€)"]) else 0,
                 axis=1
             )
         else:
@@ -341,7 +341,7 @@ def overview_and_charts():
         raw_values = display_summary[["Fund", "_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"]].set_index("Fund")
         
         # Remove helper columns from display
-        display_summary = display_summary.drop(columns=["_Total_Return_raw", "_Net_Return_raw", "_MoM_raw", "Quantity_Numeric"])
+        display_summary = display_summary.drop(columns=["_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"])
         
         # Apply color coding
         def style_fund_rows(row):
