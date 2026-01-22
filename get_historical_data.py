@@ -1,6 +1,7 @@
 from investgo import get_pair_id, get_historical_prices, get_info
 import requests
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from io import BytesIO
 import warnings
@@ -101,24 +102,23 @@ if dfs:
 
     fund_columns = [col for col in merged_table.columns if col != "Date"]
     for fund_column in fund_columns:
-        merged_table[fund_column] = merged_table[fund_column].astype(object)
+        merged_table[fund_column] = merged_table[fund_column].astype(float)
         series = merged_table[fund_column]
         first_valid_idx = series.first_valid_index()
         if first_valid_idx is None:
-            merged_table[fund_column] = "-"
+            # All NaN for this fund
             continue
-        merged_table.loc[: first_valid_idx - 1, fund_column] = "-"
-        obj_series = pd.Series(series.values, dtype=object)
-        filled_values = []
-        last_seen = None
-        for value in obj_series:
-            is_missing = value is None or (isinstance(value, float) and pd.isna(value))
-            if is_missing:
-                filled_values.append(last_seen if last_seen is not None else value)
+        # Fill before first valid with NaN
+        merged_table.loc[:first_valid_idx - 1, fund_column] = np.nan
+        # Manual forward fill to avoid warnings
+        filled_values = merged_table[fund_column].values.copy()
+        last_valid = np.nan
+        for i in range(len(filled_values)):
+            if np.isnan(filled_values[i]):
+                filled_values[i] = last_valid
             else:
-                last_seen = value
-                filled_values.append(value)
-        merged_table[fund_column] = pd.Series(filled_values, dtype=object)
+                last_valid = filled_values[i]
+        merged_table[fund_column] = filled_values
 
     merged_table = merged_table.sort_values("Date", ascending=False).reset_index(drop=True)
 
@@ -128,7 +128,7 @@ if dfs:
     available_cols = ["Date"] + [col for col in funds["Fund"].tolist() if col in merged_table.columns]
     merged_table = merged_table[available_cols]
     
-    merged_table.to_csv("latest_historical_data.csv", index=False)
-    print(f"\n✓ Saved latest_historical_data.csv with {len(merged_table)} rows and {len(merged_table.columns)} columns")
+    merged_table.to_csv("historical_data.csv", index=False, na_rep='')
+    print(f"\n✓ Saved historical_data.csv with {len(merged_table)} rows and {len(merged_table.columns)} columns")
 else:
     print("✗ No data fetched")
