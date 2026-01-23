@@ -183,111 +183,6 @@ def overview_and_charts():
     else:
         filter_funds = []
     
-    # ---------- REVENUE P&L CHART ----------
-    if len(transactions) > 0 and len(filter_funds) > 0:
-        st.subheader("💹 Revenue P&L")
-        
-        # Load historical data for price changes
-        hist_data = load_historical_prices()
-        if len(hist_data) > 0 and "date" in hist_data.columns:
-            # Calculate quantities held per fund (total from transactions)
-            qty_by_fund = transactions.groupby("Fund")["Quantity"].sum().to_dict()
-            
-            # Sort historical data chronologically
-            hist_sorted = hist_data.sort_values("date").reset_index(drop=True)
-            hist_sorted["date"] = pd.to_datetime(hist_sorted["date"])
-            
-            # Calculate daily price changes and cumulative P&L per fund
-            pnl_data = []
-            for idx in range(1, len(hist_sorted)):
-                date_current = hist_sorted.iloc[idx]["date"]
-                cumulative_portfolio = 0.0
-                fund_pnls = {}
-                
-                for fund in filter_funds:
-                    if fund in hist_sorted.columns and fund in qty_by_fund:
-                        qty = qty_by_fund[fund]
-                        prices = pd.to_numeric(hist_sorted[fund], errors="coerce")
-                        
-                        # Daily change from previous row
-                        if pd.notna(prices.iloc[idx]) and pd.notna(prices.iloc[idx-1]):
-                            daily_change = qty * (prices.iloc[idx] - prices.iloc[idx-1])
-                            fund_pnls[fund] = daily_change
-                            cumulative_portfolio += daily_change
-                
-                pnl_data.append({
-                    "date": date_current,
-                    "Portfolio": cumulative_portfolio,
-                    **fund_pnls
-                })
-            
-            if pnl_data:
-                pnl_df = pd.DataFrame(pnl_data)
-                
-                # Calculate cumulative sums
-                pnl_df["Portfolio"] = pnl_df["Portfolio"].cumsum()
-                for fund in filter_funds:
-                    if fund in pnl_df.columns:
-                        pnl_df[fund] = pnl_df[fund].fillna(0).cumsum()
-                
-                # Create line chart
-                fig_pnl = go.Figure()
-                
-                # Portfolio total line (bold)
-                fig_pnl.add_trace(go.Scatter(
-                    x=pnl_df["date"],
-                    y=pnl_df["Portfolio"],
-                    mode="lines",
-                    name="Portfolio Total",
-                    line=dict(color="#667eea", width=3),
-                    hovertemplate="<b>Portfolio Total</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
-                ))
-                
-                # Individual fund lines
-                for fund in filter_funds:
-                    if fund in pnl_df.columns:
-                        fig_pnl.add_trace(go.Scatter(
-                            x=pnl_df["date"],
-                            y=pnl_df[fund],
-                            mode="lines",
-                            name=fund,
-                            line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
-                            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
-                        ))
-                
-                fig_pnl.update_layout(
-                    height=400,
-                    hovermode="x unified",
-                    xaxis_title="",
-                    yaxis_title="Cumulative P&L (€)",
-                    template="plotly_white",
-                    showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    dragmode="pan",
-                    uirevision="revenue_pnl"
-                )
-                fig_pnl.update_xaxes(
-                    rangeslider=dict(visible=True, thickness=0.05),
-                    showspikes=True,
-                    spikemode="across"
-                )
-                fig_pnl.update_yaxes(
-                    showspikes=True,
-                    spikemode="across",
-                    zeroline=True,
-                    zerolinecolor="rgba(150,150,150,0.3)",
-                    zerolinewidth=1
-                )
-                
-                st.plotly_chart(fig_pnl, use_container_width=True, config=dict(
-                    scrollZoom=True,
-                    displaylogo=False,
-                    doubleClick="reset",
-                    toImageButtonOptions=dict(format="png", filename="revenue_pnl", height=600, width=1200, scale=2)
-                ))
-        
-        st.divider()
-    
     if len(transactions) > 0:
         df = transactions.copy()
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
@@ -606,6 +501,131 @@ def overview_and_charts():
     # ---------- CHARTS ----------
     st.divider()
     st.header("📊 Charts")
+    
+    # ---------- REVENUE P&L CHART ----------
+    if len(transactions) > 0 and len(filter_funds) > 0:
+        st.subheader("💹 Revenue P&L")
+        
+        # Load historical data for price changes
+        hist_data = load_historical_prices()
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            # Get first purchase date per fund to only count P&L from ownership start
+            first_purchase_dates = transactions.groupby("Fund")["Date"].min().to_dict()
+            first_purchase_dates = {k: pd.to_datetime(v) for k, v in first_purchase_dates.items()}
+            
+            # Get quantities held per fund at each transaction date (cumulative)
+            trans_sorted = transactions.sort_values("Date")
+            trans_sorted["Date"] = pd.to_datetime(trans_sorted["Date"])
+            
+            # Sort historical data chronologically
+            hist_sorted = hist_data.sort_values("date").reset_index(drop=True)
+            hist_sorted["date"] = pd.to_datetime(hist_sorted["date"])
+            
+            # Calculate daily price changes and cumulative P&L per fund
+            pnl_data = []
+            for idx in range(1, len(hist_sorted)):
+                date_current = hist_sorted.iloc[idx]["date"]
+                cumulative_portfolio = 0.0
+                fund_pnls = {}
+                
+                for fund in filter_funds:
+                    # Only count P&L from first purchase date onward
+                    if fund in hist_sorted.columns and fund in first_purchase_dates:
+                        if date_current < first_purchase_dates[fund]:
+                            continue
+                            
+                        # Get quantity held at this date (sum of all transactions up to this date)
+                        qty = trans_sorted[(trans_sorted["Fund"] == fund) & (trans_sorted["Date"] <= date_current)]["Quantity"].sum()
+                        
+                        if qty > 0:
+                            prices = pd.to_numeric(hist_sorted[fund], errors="coerce")
+                            
+                            # Daily change from previous row
+                            if pd.notna(prices.iloc[idx]) and pd.notna(prices.iloc[idx-1]):
+                                daily_change = qty * (prices.iloc[idx] - prices.iloc[idx-1])
+                                fund_pnls[fund] = daily_change
+                                cumulative_portfolio += daily_change
+                
+                pnl_data.append({
+                    "date": date_current,
+                    "Portfolio": cumulative_portfolio,
+                    **fund_pnls
+                })
+            
+            if pnl_data:
+                pnl_df = pd.DataFrame(pnl_data)
+                
+                # Calculate cumulative sums
+                pnl_df["Portfolio"] = pnl_df["Portfolio"].cumsum()
+                for fund in filter_funds:
+                    if fund in pnl_df.columns:
+                        pnl_df[fund] = pnl_df[fund].fillna(0).cumsum()
+                
+                # Calculate y-axis range with 0 centered and 5% padding
+                all_values = [pnl_df["Portfolio"].min(), pnl_df["Portfolio"].max()]
+                for fund in filter_funds:
+                    if fund in pnl_df.columns:
+                        all_values.extend([pnl_df[fund].min(), pnl_df[fund].max()])
+                max_abs = max(abs(min(all_values)), abs(max(all_values)))
+                y_range = max_abs * 1.05  # 5% padding
+                
+                # Create line chart
+                fig_pnl = go.Figure()
+                
+                # Portfolio total line (bold)
+                fig_pnl.add_trace(go.Scatter(
+                    x=pnl_df["date"],
+                    y=pnl_df["Portfolio"],
+                    mode="lines",
+                    name="Portfolio Total",
+                    line=dict(color="#667eea", width=3),
+                    hovertemplate="<b>Portfolio Total</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
+                ))
+                
+                # Individual fund lines
+                for fund in filter_funds:
+                    if fund in pnl_df.columns:
+                        fig_pnl.add_trace(go.Scatter(
+                            x=pnl_df["date"],
+                            y=pnl_df[fund],
+                            mode="lines",
+                            name=fund,
+                            line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
+                            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
+                        ))
+                
+                fig_pnl.update_layout(
+                    height=400,
+                    hovermode="x unified",
+                    xaxis_title="",
+                    yaxis_title="Cumulative P&L (€)",
+                    template="plotly_white",
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    dragmode="pan",
+                    uirevision="revenue_pnl"
+                )
+                fig_pnl.update_xaxes(
+                    rangeslider=dict(visible=True, thickness=0.05),
+                    showspikes=True,
+                    spikemode="across"
+                )
+                fig_pnl.update_yaxes(
+                    showspikes=True,
+                    spikemode="across",
+                    zeroline=True,
+                    zerolinecolor="rgba(150,150,150,0.5)",
+                    zerolinewidth=2,
+                    range=[-y_range, y_range]
+                )
+                
+                st.plotly_chart(fig_pnl, use_container_width=True, config=dict(
+                    scrollZoom=True,
+                    displaylogo=False,
+                    doubleClick="reset",
+                    toImageButtonOptions=dict(format="png", filename="revenue_pnl", height=600, width=1200, scale=2)
+                ))
+    
     if len(transactions) > 0:
         df = transactions.copy()
         df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
