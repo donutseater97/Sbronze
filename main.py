@@ -1942,19 +1942,55 @@ def historical_prices():
             ]
 
         # Add Daily Portfolio Performance column (absolute and percent)
-        qty_by_fund = {}
+        # DPP(t) = Σ_f [quantity_f(t-1) × (price_f(t) - price_f(t-1))]
+        # Since table is sorted descending, row i is date t, row i+1 is date t-1
+        abs_change_list = []
+        portfolio_pct_list = []
+        
         if len(transactions) > 0:
-            qty_by_fund = transactions.groupby("Fund")["Quantity"].sum().to_dict()
-        qty_series = pd.Series({f: float(qty_by_fund.get(f, 0.0)) for f in selected_funds})
-
-        prices_num = historical_data_df[selected_funds].apply(pd.to_numeric, errors="coerce")
-        delta_abs = prices_num.diff(periods=-1)
-        prev_prices = prices_num.shift(-1)
-
-        abs_change_series = delta_abs.mul(qty_series.reindex(selected_funds).fillna(0.0), axis=1).sum(axis=1)
-        prev_value_series = prev_prices.mul(qty_series.reindex(selected_funds).fillna(0.0), axis=1).sum(axis=1)
-        portfolio_pct_series = (abs_change_series / prev_value_series.replace({0: pd.NA})) * 100
-
+            tx_sorted = transactions.copy()
+            tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+            tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
+            
+            for i in range(len(display_df)):
+                current_date_str = display_df["date"].iloc[i]
+                current_date = pd.to_datetime(current_date_str)
+                
+                # Get the previous date (next row since descending)
+                if i + 1 < len(display_df):
+                    prev_date_str = display_df["date"].iloc[i + 1]
+                    prev_date = pd.to_datetime(prev_date_str)
+                    
+                    # Calculate quantity held at t-1 (prev_date) for each fund
+                    qty_at_prev = {}
+                    for fund in selected_funds:
+                        qty_at_prev[fund] = tx_sorted[(tx_sorted["Fund"] == fund) & (tx_sorted["Date"] <= prev_date)]["Quantity"].sum()
+                    
+                    # Calculate price changes and portfolio performance
+                    daily_change = 0.0
+                    prev_portfolio_value = 0.0
+                    
+                    for fund in selected_funds:
+                        qty = qty_at_prev.get(fund, 0.0)
+                        if qty > 0:
+                            current_price = pd.to_numeric(historical_data_df[fund].iloc[i], errors="coerce")
+                            prev_price = pd.to_numeric(historical_data_df[fund].iloc[i + 1], errors="coerce")
+                            
+                            if pd.notna(current_price) and pd.notna(prev_price):
+                                daily_change += qty * (current_price - prev_price)
+                                prev_portfolio_value += qty * prev_price
+                    
+                    abs_change_list.append(daily_change if prev_portfolio_value > 0 else pd.NA)
+                    portfolio_pct_list.append((daily_change / prev_portfolio_value * 100) if prev_portfolio_value > 0 else pd.NA)
+                else:
+                    abs_change_list.append(pd.NA)
+                    portfolio_pct_list.append(pd.NA)
+        else:
+            abs_change_list = [pd.NA] * len(display_df)
+            portfolio_pct_list = [pd.NA] * len(display_df)
+        
+        abs_change_series = pd.Series(abs_change_list)
+        portfolio_pct_series = pd.Series(portfolio_pct_list)
         perf_pct_map["Daily Portfolio Performance"] = portfolio_pct_series
 
         def _fmt_portfolio(abs_eur, pct):
