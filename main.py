@@ -465,24 +465,6 @@ def overview_and_charts():
                 delta_color="normal",
             )
         with row1_col3:
-            st.metric(
-                "Total Fees",
-                f"€ {total_fees:,.2f}",
-                delta=f"↓ {total_fees_pct:.2f}%",
-                delta_color="off",
-            )
-
-        row2_col1, row2_col2, row2_col3 = st.columns(3)
-        with row2_col1:
-            st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
-        with row2_col2:
-            st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
-        with row2_col3:
-            st.metric("Total Net Invested", f"€ {total_net:,.2f}")
-
-        # Daily Portfolio Performance total metric (absolute + percent)
-        row3_col1, row3_col2, row3_col3 = st.columns(3)
-        with row3_col1:
             portfolio_abs_delta = 0.0
             prev_portfolio_value = 0.0
             for fund in summary["Fund"].tolist():
@@ -495,9 +477,24 @@ def overview_and_charts():
                     prev_portfolio_value += float(qty_val) * float(prev_price)
             if prev_portfolio_value and prev_portfolio_value != 0:
                 pct_delta = (portfolio_abs_delta / prev_portfolio_value) * 100.0
-                st.metric("Daily Portfolio Performance", f"€ {portfolio_abs_delta:,.2f}", delta=f"{pct_delta:+.2f}%")
+                st.metric("Daily Portfolio Performance", f"€ {portfolio_abs_delta:,.2f}", delta=f"{pct_delta:+.2f}%", delta_color="normal")
             else:
                 st.metric("Daily Portfolio Performance", f"€ {portfolio_abs_delta:,.2f}")
+
+        row2_col1, row2_col2, row2_col3 = st.columns(3)
+        with row2_col1:
+            st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
+        with row2_col2:
+            st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
+        with row2_col3:
+            st.metric(
+                "Total Fees",
+                f"€ {total_fees:,.2f}",
+                delta=f"↓ {total_fees_pct:.2f}%",
+                delta_color="off",
+            )
+
+
     else:
         st.info("No transactions yet")
 
@@ -586,39 +583,89 @@ def overview_and_charts():
             with col_pie:
                 st.subheader("💰 Allocation")
                 alloc_by = st.selectbox("Group by:", ["Fund", "Type"], key="alloc_selectbox")
-                
-                if alloc_by == "Fund":
-                    alloc = df.groupby("Fund")["invested"].sum().reset_index()
-                    alloc = alloc.sort_values("invested", ascending=False)
-                    alloc.columns = ["Category", "Value"]
-                    color_map = {cat: FUND_COLORS.get(cat, "#999999") for cat in alloc["Category"]}
-                else:  # Type
-                    alloc = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
-                    alloc = alloc.groupby("Type")["invested"].sum().reset_index()
-                    alloc = alloc.sort_values("invested", ascending=False)
-                    alloc.columns = ["Category", "Value"]
-                    color_map = {
-                        "Bond": "#1f77b4", "Equity": "#ff7f0e", "Mixed": "#2ca02c", 
-                        "Commodity": "#d62728", "Alternative": "#9467bd", "Other": "#8c564b"
-                    }
-                
-                fig_alloc = go.Figure(data=[go.Pie(
-                    labels=alloc["Category"],
-                    values=alloc["Value"],
-                    hole=0.4,
-                    marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc["Category"]]),
-                    textinfo="percent",
-                    textfont=dict(size=16, color="white"),
-                    hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
-                )])
-                fig_alloc.update_layout(height=450, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
-                st.plotly_chart(fig_alloc, use_container_width=True)
 
-                # Legend centered below the allocation chart
+                # Colors per category
+                default_type_colors = {
+                    "Bond": "#1f77b4", "Equity": "#ff7f0e", "Mixed": "#2ca02c",
+                    "Commodity": "#d62728", "Alternative": "#9467bd", "Other": "#8c564b"
+                }
+
+                # Gross Contributions (left pie)
+                if alloc_by == "Fund":
+                    alloc_gc = df.groupby("Fund")["invested"].sum().reset_index()
+                    alloc_gc = alloc_gc.sort_values("invested", ascending=False)
+                    alloc_gc.columns = ["Category", "Value"]
+                    color_map = {cat: FUND_COLORS.get(cat, "#999999") for cat in alloc_gc["Category"]}
+                else:  # Type
+                    tmp = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
+                    alloc_gc = tmp.groupby("Type")["invested"].sum().reset_index()
+                    alloc_gc = alloc_gc.sort_values("invested", ascending=False)
+                    alloc_gc.columns = ["Category", "Value"]
+                    color_map = {cat: default_type_colors.get(cat, "#999999") for cat in alloc_gc["Category"]}
+
+                # Market Value (right pie) based on latest historical prices
+                hist_latest = load_historical_prices()
+                mv_map = {}
+                if len(hist_latest) > 0 and "date" in hist_latest.columns:
+                    latest_d = pd.to_datetime(hist_latest["date"], errors="coerce").max()
+                    # quantities by fund
+                    qty_by_fund = df.groupby("Fund")["Quantity"].sum()
+                    for fund in qty_by_fund.index:
+                        if fund in hist_latest.columns:
+                            price_vals = hist_latest[hist_latest["date"] == latest_d][fund].values
+                            if len(price_vals) > 0 and pd.notna(price_vals[0]):
+                                mv_map[fund] = float(qty_by_fund.loc[fund]) * float(price_vals[0])
+                # Build MV allocation grouped as requested
+                if alloc_by == "Fund":
+                    alloc_mv = pd.DataFrame({"Category": list(mv_map.keys()), "Value": list(mv_map.values())})
+                    alloc_mv = alloc_mv.sort_values("Value", ascending=False)
+                else:
+                    mv_df = pd.DataFrame({"Fund": list(mv_map.keys()), "MV": list(mv_map.values())})
+                    mv_df = mv_df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
+                    alloc_mv = mv_df.groupby("Type")["MV"].sum().reset_index().rename(columns={"Type": "Category", "MV": "Value"})
+                    alloc_mv = alloc_mv.sort_values("Value", ascending=False)
+                    # ensure color map includes types
+                    for cat in alloc_mv["Category"].tolist():
+                        color_map.setdefault(cat, default_type_colors.get(cat, "#999999"))
+
+                # Render two pies side by side
+                pie_left, pie_right = st.columns(2)
+                with pie_left:
+                    st.caption("Gross Contributions")
+                    fig_gc = go.Figure(data=[go.Pie(
+                        labels=alloc_gc["Category"],
+                        values=alloc_gc["Value"],
+                        hole=0.4,
+                        marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc_gc["Category"]]),
+                        textinfo="percent",
+                        textposition="inside",
+                        textfont=dict(size=16, color="white"),
+                        hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
+                    )])
+                    fig_gc.update_layout(height=450, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
+                    st.plotly_chart(fig_gc, use_container_width=True)
+
+                with pie_right:
+                    st.caption("Market Value")
+                    fig_mv = go.Figure(data=[go.Pie(
+                        labels=alloc_mv["Category"],
+                        values=alloc_mv["Value"],
+                        hole=0.4,
+                        marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc_mv["Category"]]),
+                        textinfo="percent",
+                        textposition="inside",
+                        textfont=dict(size=16, color="white"),
+                        hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
+                    )])
+                    fig_mv.update_layout(height=450, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
+                    st.plotly_chart(fig_mv, use_container_width=True)
+
+                # Unified legend centered below the pies
                 legend_row_style = "display:flex; justify-content:center; flex-wrap:nowrap; gap:16px; align-items:center; overflow-x:auto; padding:6px 0; border-top:1px solid rgba(150,150,150,.2);"
+                cats_union = list(dict.fromkeys(list(alloc_gc["Category"]) + list(alloc_mv["Category"])))
                 alloc_legend = f"<div style='{legend_row_style}'>" + "".join([
                     f"<div><span style='display:inline-block;width:12px;height:12px;border-radius:2px;background:{color_map.get(cat, '#999999')};border:1px solid rgba(0,0,0,.35);margin-right:6px;vertical-align:middle;'></span>{cat}</div>"
-                    for cat in alloc["Category"]
+                    for cat in cats_union
                 ]) + "</div>"
                 st.markdown(alloc_legend, unsafe_allow_html=True)
             
