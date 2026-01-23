@@ -1554,16 +1554,19 @@ def historical_prices():
         perf_pct_map = {}
         display_df = historical_data_df.copy()
         for col in selected_funds:
-            # pct_change compares current row to previous row (table is sorted desc)
-            perf = display_df[col].pct_change() * 100
+            # Table is sorted descending by date; compare current to the next row (previous day)
+            perf = display_df[col].pct_change(periods=-1) * 100
             perf_pct_map[col] = perf
             def _fmt(val, p):
                 if pd.isna(val):
                     return ""
-                if pd.isna(p) or p == 0:
+                if pd.isna(p):
                     return f"€{val:.2f}"
-                sign = "+" if p > 0 else ""
-                return f"€{val:.2f} ({sign}{p:.2f}%)"
+                p_fmt = round(float(p), 2)
+                if p_fmt == 0:
+                    return f"€{val:.2f} (0.00%)"
+                sign = "+" if p_fmt > 0 else ""
+                return f"€{val:.2f} ({sign}{p_fmt:.2f}%)"
             display_df[col] = [
                 _fmt(v, perf_pct_map[col].iloc[i]) for i, v in enumerate(display_df[col].values)
             ]
@@ -1574,9 +1577,10 @@ def historical_prices():
             styles = []
             for i in range(len(display_df)):
                 p = perf.iloc[i]
-                if pd.isna(p) or p == 0:
+                p_fmt = None if pd.isna(p) else round(float(p), 2)
+                if p_fmt is None or p_fmt == 0:
                     styles.append("")
-                elif p > 0:
+                elif p_fmt > 0:
                     styles.append("color: #6BCB77; font-weight: 600;")
                 else:
                     styles.append("color: #E26A6A; font-weight: 600;")
