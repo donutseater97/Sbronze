@@ -596,6 +596,23 @@ def overview_and_charts():
                         line=dict(color="#667eea", width=3),
                         hovertemplate="<b>Portfolio Total</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
                     ))
+                    
+                    # Add annotation for last point
+                    last_date = pnl_df["date"].iloc[-1]
+                    last_value = pnl_df["Portfolio"].iloc[-1]
+                    fig_pnl.add_annotation(
+                        x=last_date,
+                        y=last_value,
+                        text=f"€{last_value:,.0f}",
+                        showarrow=False,
+                        xanchor="left",
+                        xshift=10,
+                        font=dict(size=14, color="#667eea"),
+                        bordercolor="#667eea",
+                        borderwidth=2,
+                        borderpad=4,
+                        bgcolor="rgba(255,255,255,0)"
+                    )
                 
                 # Individual fund lines
                 for fund in filter_funds:
@@ -608,6 +625,23 @@ def overview_and_charts():
                             line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
                             hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
                         ))
+                        
+                        # Add annotation for last point
+                        last_date = pnl_df["date"].iloc[-1]
+                        last_value = pnl_df[fund].iloc[-1]
+                        fig_pnl.add_annotation(
+                            x=last_date,
+                            y=last_value,
+                            text=f"€{last_value:,.0f}",
+                            showarrow=False,
+                            xanchor="left",
+                            xshift=10,
+                            font=dict(size=13, color=FUND_COLORS.get(fund, "#999999")),
+                            bordercolor=FUND_COLORS.get(fund, "#999999"),
+                            borderwidth=1.5,
+                            borderpad=4,
+                            bgcolor="rgba(255,255,255,0)"
+                        )
                 
                 fig_pnl.update_layout(
                     height=600,
@@ -619,7 +653,8 @@ def overview_and_charts():
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     dragmode="pan",
                     uirevision="revenue_pnl",
-                    newshape=dict(line_color="#888888")
+                    newshape=dict(line_color="#888888"),
+                    margin=dict(r=100)
                 )
                 fig_pnl.update_xaxes(
                     rangeslider=dict(visible=True, thickness=0.07),
@@ -746,7 +781,7 @@ def overview_and_charts():
             
             with col_pie:
                 st.subheader("💰 Allocation")
-                alloc_by = st.selectbox("Group by:", ["Fund", "Type"], key="alloc_selectbox")
+                alloc_by = st.selectbox("Group by:", ["Fund", "Type", "Asset Manager"], key="alloc_selectbox")
 
                 # Colors per category
                 default_type_colors = {
@@ -760,9 +795,16 @@ def overview_and_charts():
                     alloc_gc = alloc_gc.sort_values("invested", ascending=False)
                     alloc_gc.columns = ["Category", "Value"]
                     color_map = {cat: FUND_COLORS.get(cat, "#999999") for cat in alloc_gc["Category"]}
-                else:  # Type
+                elif alloc_by == "Type":
                     tmp = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
                     alloc_gc = tmp.groupby("Type")["invested"].sum().reset_index()
+                    alloc_gc = alloc_gc.sort_values("invested", ascending=False)
+                    alloc_gc.columns = ["Category", "Value"]
+                    color_map = {cat: default_type_colors.get(cat, "#999999") for cat in alloc_gc["Category"]}
+                else:  # Asset Manager
+                    tmp = df.merge(funds[["Fund", "Fund Name"]], on="Fund", how="left")
+                    tmp["Asset Manager"] = tmp["Fund Name"].str.split().str[0]
+                    alloc_gc = tmp.groupby("Asset Manager")["invested"].sum().reset_index()
                     alloc_gc = alloc_gc.sort_values("invested", ascending=False)
                     alloc_gc.columns = ["Category", "Value"]
                     color_map = {cat: default_type_colors.get(cat, "#999999") for cat in alloc_gc["Category"]}
@@ -783,7 +825,7 @@ def overview_and_charts():
                 if alloc_by == "Fund":
                     alloc_mv = pd.DataFrame({"Category": list(mv_map.keys()), "Value": list(mv_map.values())})
                     alloc_mv = alloc_mv.sort_values("Value", ascending=False)
-                else:
+                elif alloc_by == "Type":
                     mv_df = pd.DataFrame({"Fund": list(mv_map.keys()), "MV": list(mv_map.values())})
                     mv_df = mv_df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
                     alloc_mv = mv_df.groupby("Type")["MV"].sum().reset_index().rename(columns={"Type": "Category", "MV": "Value"})
@@ -791,6 +833,15 @@ def overview_and_charts():
                     # ensure color map includes types
                     for cat in alloc_mv["Category"].tolist():
                         color_map.setdefault(cat, default_type_colors.get(cat, "#999999"))
+                else:  # Asset Manager
+                    mv_df = pd.DataFrame({"Fund": list(mv_map.keys()), "MV": list(mv_map.values())})
+                    mv_df = mv_df.merge(funds[["Fund", "Fund Name"]], on="Fund", how="left")
+                    mv_df["Asset Manager"] = mv_df["Fund Name"].str.split().str[0]
+                    alloc_mv = mv_df.groupby("Asset Manager")["MV"].sum().reset_index().rename(columns={"Asset Manager": "Category", "MV": "Value"})
+                    alloc_mv = alloc_mv.sort_values("Value", ascending=False)
+                    # ensure color map includes asset managers
+                    for cat in alloc_mv["Category"].tolist():
+                        color_map.setdefault(cat, "#999999")
 
                 # Render two pies side by side
                 pie_left, pie_right = st.columns(2)
@@ -806,7 +857,7 @@ def overview_and_charts():
                         textfont=dict(size=16, color="white"),
                         hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
                     )])
-                    fig_gc.update_layout(height=450, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
+                    fig_gc.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
                     st.plotly_chart(fig_gc, use_container_width=True)
 
                 with pie_right:
@@ -821,7 +872,7 @@ def overview_and_charts():
                         textfont=dict(size=16, color="white"),
                         hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
                     )])
-                    fig_mv.update_layout(height=450, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
+                    fig_mv.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
                     st.plotly_chart(fig_mv, use_container_width=True)
 
                 # Unified legend centered below the pies
@@ -1543,6 +1594,7 @@ def historical_prices():
             dragmode="pan",
             uirevision="hist_combined",
             newshape=dict(line_color="#888888"),
+            margin=dict(r=100)
         )
         fig_combined.update_xaxes(
             rangeslider=dict(visible=True, thickness=0.07),
@@ -1581,6 +1633,26 @@ def historical_prices():
             # Add annotations for latest prices on the y-axis
             for fund, price in latest_prices.items():
                 fig_combined.add_annotation(**create_price_annotation(price, fund))
+            
+            # Add data label annotations for last point of each fund
+            for fund in selected_funds:
+                fund_df = plot_df[["date", fund]].dropna().sort_values("date")
+                if len(fund_df) > 0:
+                    last_date = fund_df["date"].iloc[-1]
+                    last_price = fund_df[fund].iloc[-1]
+                    fig_combined.add_annotation(
+                        x=last_date,
+                        y=last_price,
+                        text=f"€{last_price:,.2f}",
+                        showarrow=False,
+                        xanchor="left",
+                        xshift=10,
+                        font=dict(size=13, color=FUND_COLORS.get(fund, "#999999")),
+                        bordercolor=FUND_COLORS.get(fund, "#999999"),
+                        borderwidth=1.5,
+                        borderpad=4,
+                        bgcolor="rgba(255,255,255,0)"
+                    )
         else:
             yaxis_config['autorange'] = True
         
@@ -1711,7 +1783,7 @@ def historical_prices():
                         template="plotly_white",
                         legend_title="",
                         showlegend=False,
-                        margin=dict(t=40, b=30, l=10, r=10),
+                        margin=dict(t=40, b=30, l=10, r=100),
                         dragmode="pan",
                         # Use shared uirevision to maintain zoom/pan state across Streamlit reruns.
                         # Note: Streamlit + Plotly don't support real-time synchronization between
@@ -1762,6 +1834,22 @@ def historical_prices():
                         
                         # Add annotation for latest price on the y-axis
                         fig_fund.add_annotation(**create_price_annotation(latest_price, fund))
+                        
+                        # Add data label annotation for last point
+                        last_date = fund_df["date"].iloc[-1]
+                        fig_fund.add_annotation(
+                            x=last_date,
+                            y=latest_price,
+                            text=f"€{latest_price:,.2f}",
+                            showarrow=False,
+                            xanchor="left",
+                            xshift=10,
+                            font=dict(size=13, color=FUND_COLORS.get(fund, "#999999")),
+                            bordercolor=FUND_COLORS.get(fund, "#999999"),
+                            borderwidth=1.5,
+                            borderpad=4,
+                            bgcolor="rgba(255,255,255,0)"
+                        )
                     else:
                         yaxis_config['autorange'] = True
                     
