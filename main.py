@@ -504,11 +504,22 @@ def overview_and_charts():
     
     # ---------- REVENUE P&L CHART ----------
     if len(transactions) > 0 and len(filter_funds) > 0:
-        st.subheader("💹 Revenue P&L")
+        # Toggle for showing portfolio total line
+        col_title, col_toggle = st.columns([3, 1])
+        with col_title:
+            st.subheader("💹 Revenue P&L")
+        with col_toggle:
+            if "show_pnl_total" not in st.session_state:
+                st.session_state.show_pnl_total = True
+            show_total = st.toggle("Show Total", value=st.session_state.show_pnl_total, key="pnl_total_toggle")
+            st.session_state.show_pnl_total = show_total
         
         # Load historical data for price changes
         hist_data = load_historical_prices()
         if len(hist_data) > 0 and "date" in hist_data.columns:
+            # Get first transaction date overall (earliest date from transaction_history.csv)
+            first_transaction_date = pd.to_datetime(transactions["Date"]).min()
+            
             # Get first purchase date per fund to only count P&L from ownership start
             first_purchase_dates = transactions.groupby("Fund")["Date"].min().to_dict()
             first_purchase_dates = {k: pd.to_datetime(v) for k, v in first_purchase_dates.items()}
@@ -517,9 +528,10 @@ def overview_and_charts():
             trans_sorted = transactions.sort_values("Date")
             trans_sorted["Date"] = pd.to_datetime(trans_sorted["Date"])
             
-            # Sort historical data chronologically
+            # Sort historical data chronologically and filter from first transaction date
             hist_sorted = hist_data.sort_values("date").reset_index(drop=True)
             hist_sorted["date"] = pd.to_datetime(hist_sorted["date"])
+            hist_sorted = hist_sorted[hist_sorted["date"] >= first_transaction_date].reset_index(drop=True)
             
             # Calculate daily price changes and cumulative P&L per fund
             pnl_data = []
@@ -562,25 +574,28 @@ def overview_and_charts():
                         pnl_df[fund] = pnl_df[fund].fillna(0).cumsum()
                 
                 # Calculate y-axis range with 0 centered and 5% padding
-                all_values = [pnl_df["Portfolio"].min(), pnl_df["Portfolio"].max()]
+                all_values = []
+                if show_total:
+                    all_values.extend([pnl_df["Portfolio"].min(), pnl_df["Portfolio"].max()])
                 for fund in filter_funds:
                     if fund in pnl_df.columns:
                         all_values.extend([pnl_df[fund].min(), pnl_df[fund].max()])
-                max_abs = max(abs(min(all_values)), abs(max(all_values)))
+                max_abs = max(abs(min(all_values)), abs(max(all_values))) if all_values else 1000
                 y_range = max_abs * 1.05  # 5% padding
                 
                 # Create line chart
                 fig_pnl = go.Figure()
                 
-                # Portfolio total line (bold)
-                fig_pnl.add_trace(go.Scatter(
-                    x=pnl_df["date"],
-                    y=pnl_df["Portfolio"],
-                    mode="lines",
-                    name="Portfolio Total",
-                    line=dict(color="#667eea", width=3),
-                    hovertemplate="<b>Portfolio Total</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
-                ))
+                # Portfolio total line (bold) - only if toggle is on
+                if show_total:
+                    fig_pnl.add_trace(go.Scatter(
+                        x=pnl_df["date"],
+                        y=pnl_df["Portfolio"],
+                        mode="lines",
+                        name="Portfolio Total",
+                        line=dict(color="#667eea", width=3),
+                        hovertemplate="<b>Portfolio Total</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
+                    ))
                 
                 # Individual fund lines
                 for fund in filter_funds:
@@ -595,7 +610,7 @@ def overview_and_charts():
                         ))
                 
                 fig_pnl.update_layout(
-                    height=400,
+                    height=600,
                     hovermode="x unified",
                     xaxis_title="",
                     yaxis_title="Cumulative P&L (€)",
@@ -603,14 +618,30 @@ def overview_and_charts():
                     showlegend=True,
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     dragmode="pan",
-                    uirevision="revenue_pnl"
+                    uirevision="revenue_pnl",
+                    newshape=dict(line_color="#888888")
                 )
                 fig_pnl.update_xaxes(
-                    rangeslider=dict(visible=True, thickness=0.05),
+                    rangeslider=dict(visible=True, thickness=0.07),
+                    rangeselector=dict(
+                        buttons=[
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="YTD", step="year", stepmode="todate"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ]
+                    ),
                     showspikes=True,
-                    spikemode="across"
+                    spikemode="across",
+                    spikesnap="cursor",
+                    spikethickness=1,
+                    spikecolor="#888888"
                 )
                 fig_pnl.update_yaxes(
+                    rangemode="normal",
+                    fixedrange=False,
                     showspikes=True,
                     spikemode="across",
                     zeroline=True,
@@ -623,6 +654,14 @@ def overview_and_charts():
                     scrollZoom=True,
                     displaylogo=False,
                     doubleClick="reset",
+                    modeBarButtonsToAdd=[
+                        "drawline",
+                        "eraseshape",
+                        "zoom2d",
+                        "pan2d",
+                        "select2d",
+                        "lasso2d",
+                    ],
                     toImageButtonOptions=dict(format="png", filename="revenue_pnl", height=600, width=1200, scale=2)
                 ))
     
