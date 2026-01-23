@@ -616,32 +616,37 @@ def overview_and_charts():
                 
                 # Individual fund lines
                 for fund in filter_funds:
-                    if fund in pnl_df.columns:
-                        fig_pnl.add_trace(go.Scatter(
-                            x=pnl_df["date"],
-                            y=pnl_df[fund],
-                            mode="lines",
-                            name=fund,
-                            line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
-                            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
-                        ))
+                    if fund in pnl_df.columns and fund in first_purchase_dates:
+                        # Filter to show line only from first contribution date
+                        fund_start_date = first_purchase_dates[fund]
+                        fund_pnl_df = pnl_df[pnl_df["date"] >= fund_start_date].copy()
                         
-                        # Add annotation for last point
-                        last_date = pnl_df["date"].iloc[-1]
-                        last_value = pnl_df[fund].iloc[-1]
-                        fig_pnl.add_annotation(
-                            x=last_date,
-                            y=last_value,
-                            text=f"€{last_value:,.0f}",
-                            showarrow=False,
-                            xanchor="left",
-                            xshift=10,
-                            font=dict(size=13, color=FUND_COLORS.get(fund, "#999999")),
-                            bordercolor=FUND_COLORS.get(fund, "#999999"),
-                            borderwidth=1.5,
-                            borderpad=4,
-                            bgcolor="rgba(255,255,255,0)"
-                        )
+                        if len(fund_pnl_df) > 0:
+                            fig_pnl.add_trace(go.Scatter(
+                                x=fund_pnl_df["date"],
+                                y=fund_pnl_df[fund],
+                                mode="lines",
+                                name=fund,
+                                line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
+                                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
+                            ))
+                            
+                            # Add annotation for last point
+                            last_date = fund_pnl_df["date"].iloc[-1]
+                            last_value = fund_pnl_df[fund].iloc[-1]
+                            fig_pnl.add_annotation(
+                                x=last_date,
+                                y=last_value,
+                                text=f"€{last_value:,.0f}",
+                                showarrow=False,
+                                xanchor="left",
+                                xshift=10,
+                                font=dict(size=13, color=FUND_COLORS.get(fund, "#999999")),
+                                bordercolor=FUND_COLORS.get(fund, "#999999"),
+                                borderwidth=1.5,
+                                borderpad=4,
+                                bgcolor="rgba(255,255,255,0)"
+                            )
                 
                 fig_pnl.update_layout(
                     height=600,
@@ -1630,10 +1635,6 @@ def historical_prices():
             yaxis_config['range'] = [y_axis_min, y_axis_max]
             yaxis_config['autorange'] = False
             
-            # Add annotations for latest prices on the y-axis
-            for fund, price in latest_prices.items():
-                fig_combined.add_annotation(**create_price_annotation(price, fund))
-            
             # Add data label annotations for last point of each fund
             for fund in selected_funds:
                 fund_df = plot_df[["date", fund]].dropna().sort_values("date")
@@ -1831,9 +1832,6 @@ def historical_prices():
                     if y_axis_min is not None and y_axis_max is not None:
                         yaxis_config['range'] = [y_axis_min, y_axis_max]
                         yaxis_config['autorange'] = False
-                        
-                        # Add annotation for latest price on the y-axis
-                        fig_fund.add_annotation(**create_price_annotation(latest_price, fund))
                         
                         # Add data label annotation for last point
                         last_date = fund_df["date"].iloc[-1]
