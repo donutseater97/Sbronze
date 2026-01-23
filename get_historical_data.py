@@ -10,10 +10,13 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # Load funds configuration
 funds = pd.read_csv("funds.csv")
+print(f"DEBUG: Funds loaded: {funds['Fund'].tolist()}")
+print(f"DEBUG: Number of funds: {len(funds)}")
 
 # Separate Me A Ee from the rest
 meaee_fund = funds[funds["Fund"] == "Me A Ee"].iloc[0]
 investgo_funds = funds[funds["Fund"] != "Me A Ee"]
+print(f"DEBUG: investgo_funds: {investgo_funds['Fund'].tolist()}")
 
 dfs = []
 
@@ -52,6 +55,7 @@ for ticker, pair_id in pair_ids.items():
 print("\nFetching Me A Ee from JPMorgan API...")
 try:
     isin = meaee_fund["ISIN"]
+    print(f"DEBUG: Using ISIN: {isin}")
     base_url = "https://am.jpmorgan.com/FundsMarketingHandler/excel"
     params = {
         "type": "historicalNav",
@@ -62,17 +66,21 @@ try:
         "fromDate": "1990-01-01",
         "toDate": datetime.now().strftime("%Y-%m-%d")
     }
+    print(f"DEBUG: API params: {params}")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     }
     
-    response = requests.get(base_url, params=params, headers=headers)
+    print(f"DEBUG: Making request to {base_url}")
+    response = requests.get(base_url, params=params, headers=headers, timeout=30)
+    print(f"DEBUG: Response status code: {response.status_code}")
     response.raise_for_status()
     
     # Parse Excel response
     excel_file = BytesIO(response.content)
     df_raw = pd.read_excel(excel_file)
+    print(f"DEBUG: Raw Excel shape: {df_raw.shape}")
     
     # Clean data: skip header rows
     df = df_raw.iloc[4:].copy()
@@ -90,6 +98,8 @@ try:
     print(f"✓ Me A Ee: {len(df)} rows")
 except Exception as e:
     print(f"✗ Me A Ee: {e}")
+    import traceback
+    traceback.print_exc()
 
 # 3. Merge all dataframes
 print("\nMerging data...")
