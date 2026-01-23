@@ -265,9 +265,34 @@ def overview_and_charts():
             summary["Latest Price (€)"] = summary["Fund"].map(latest_prices)
             # Calculate Market Value with numeric quantities before formatting
             summary["Market Value (€)"] = qty_numeric * summary["Latest Price (€)"].fillna(0.0)
+
+            # Compute per-fund latest daily % and absolute € change using historical data
+            latest_pct_map = {}
+            latest_abs_change_map = {}
+            prev_value_map = {}
+            hist_sorted = hist_data.sort_values("date", ascending=False)
+            for fund in summary["Fund"]:
+                if fund in hist_sorted.columns:
+                    s = pd.to_numeric(hist_sorted[fund], errors="coerce")
+                    if len(s) > 1 and pd.notna(s.iloc[0]) and pd.notna(s.iloc[1]):
+                        pct = (s.iloc[0] / s.iloc[1] - 1.0) * 100.0
+                        latest_pct_map[fund] = round(float(pct), 2)
+                        latest_abs_change_map[fund] = float(s.iloc[0] - s.iloc[1])
+                        prev_value_map[fund] = float(s.iloc[1])
+                    else:
+                        latest_pct_map[fund] = None
+                        latest_abs_change_map[fund] = None
+                        prev_value_map[fund] = None
+                else:
+                    latest_pct_map[fund] = None
+                    latest_abs_change_map[fund] = None
+                    prev_value_map[fund] = None
         else:
             summary["Latest Price (€)"] = 0.0
             summary["Market Value (€)"] = 0.0
+            latest_pct_map = {f: None for f in summary["Fund"]}
+            latest_abs_change_map = {f: None for f in summary["Fund"]}
+            prev_value_map = {f: None for f in summary["Fund"]}
         
         # Now format Quantity for display
         summary["Quantity"] = summary.apply(format_qty_overview, axis=1)
@@ -333,9 +358,36 @@ def overview_and_charts():
         display_summary["_Net_Return_raw"] = summary["Net Return (€)"]
         display_summary["_MoM_raw"] = summary["MoM performance (%)"]
         
-        # Format numeric columns
-        for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Latest Price (€)", "Average NAV (€)", "Market Value (€)"]:
+        # Format numeric columns (leave Latest Price/Market Value for custom annotation below)
+        for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
             display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
+
+        # Latest Price (€) with daily % annotation
+        def _fmt_latest_price_row(row):
+            fund = row["Fund"]
+            price = summary.loc[summary["Fund"] == fund, "Latest Price (€)"].values[0]
+            base = f"€ {float(price):,.2f}" if pd.notna(price) else "€ 0.00"
+            pct = latest_pct_map.get(fund)
+            if pct is None:
+                return base
+            if pct == 0:
+                return f"{base} (0.00%)"
+            sign = "+" if pct > 0 else ""
+            return f"{base} ({sign}{pct:.2f}%)"
+        display_summary["Latest Price (€)"] = display_summary.apply(_fmt_latest_price_row, axis=1)
+
+        # Market Value (€) with daily € change (qty × Δprice)
+        def _fmt_market_value_row(row):
+            fund = row["Fund"]
+            mv = summary.loc[summary["Fund"] == fund, "Market Value (€)"].values[0]
+            abs_change = latest_abs_change_map.get(fund)
+            qty_val = qty_numeric[summary["Fund"] == fund].values[0] if fund in summary["Fund"].values else 0.0
+            base = f"€ {float(mv):,.2f}" if pd.notna(mv) else "€ 0.00"
+            if abs_change is None:
+                return base
+            delta_eur = float(qty_val) * float(abs_change)
+            return f"{base} ({delta_eur:+.2f})"
+        display_summary["Market Value (€)"] = display_summary.apply(_fmt_market_value_row, axis=1)
         
         display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
         display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(lambda x: f"{x:.2f}%")
@@ -427,6 +479,25 @@ def overview_and_charts():
             st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
         with row2_col3:
             st.metric("Total Net Invested", f"€ {total_net:,.2f}")
+
+        # Daily Portfolio Performance total metric (absolute + percent)
+        row3_col1, row3_col2, row3_col3 = st.columns(3)
+        with row3_col1:
+            portfolio_abs_delta = 0.0
+            prev_portfolio_value = 0.0
+            for fund in summary["Fund"].tolist():
+                qty_val = qty_numeric[summary["Fund"] == fund].values[0] if fund in summary["Fund"].values else 0.0
+                abs_change = latest_abs_change_map.get(fund)
+                prev_price = prev_value_map.get(fund)
+                if abs_change is not None:
+                    portfolio_abs_delta += float(qty_val) * float(abs_change)
+                if prev_price is not None:
+                    prev_portfolio_value += float(qty_val) * float(prev_price)
+            if prev_portfolio_value and prev_portfolio_value != 0:
+                pct_delta = (portfolio_abs_delta / prev_portfolio_value) * 100.0
+                st.metric("Daily Portfolio Performance", f"€ {portfolio_abs_delta:,.2f}", delta=f"{pct_delta:+.2f}%")
+            else:
+                st.metric("Daily Portfolio Performance", f"€ {portfolio_abs_delta:,.2f}")
     else:
         st.info("No transactions yet")
 
@@ -536,9 +607,8 @@ def overview_and_charts():
                     values=alloc["Value"],
                     hole=0.4,
                     marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc["Category"]]),
-                    textposition="inside",
                     textinfo="percent",
-                    textfont=dict(size=18, color="white"),
+                    textfont=dict(size=16, color="white"),
                     hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
                 )])
                 fig_alloc.update_layout(height=450, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
@@ -1553,6 +1623,15 @@ def historical_prices():
         # Compute and format daily performance per fund
         perf_pct_map = {}
         display_df = historical_data_df.copy()
+        # Map of transaction dates per fund for cell highlighting
+        tx_dates_by_fund = {}
+        if len(transactions) > 0:
+            tx_tmp = transactions.copy()
+            tx_tmp["Date"] = pd.to_datetime(tx_tmp["Date"], errors="coerce")
+            tx_tmp = tx_tmp.dropna(subset=["Date"]) 
+            for f in selected_funds:
+                tx_dates_by_fund[f] = set(tx_tmp[tx_tmp["Fund"] == f]["Date"].dt.strftime("%Y-%m-%d").tolist())
+
         for col in selected_funds:
             # Table is sorted descending by date; compare current to the next row (previous day)
             perf = display_df[col].pct_change(periods=-1) * 100
@@ -1571,6 +1650,36 @@ def historical_prices():
                 _fmt(v, perf_pct_map[col].iloc[i]) for i, v in enumerate(display_df[col].values)
             ]
 
+        # Add Daily Portfolio Performance column (absolute and percent)
+        qty_by_fund = {}
+        if len(transactions) > 0:
+            qty_by_fund = transactions.groupby("Fund")["Quantity"].sum().to_dict()
+        qty_series = pd.Series({f: float(qty_by_fund.get(f, 0.0)) for f in selected_funds})
+
+        prices_num = historical_data_df[selected_funds].apply(pd.to_numeric, errors="coerce")
+        delta_abs = prices_num.diff(periods=-1)
+        prev_prices = prices_num.shift(-1)
+
+        abs_change_series = delta_abs.mul(qty_series.reindex(selected_funds).fillna(0.0), axis=1).sum(axis=1)
+        prev_value_series = prev_prices.mul(qty_series.reindex(selected_funds).fillna(0.0), axis=1).sum(axis=1)
+        portfolio_pct_series = (abs_change_series / prev_value_series.replace({0: pd.NA})) * 100
+
+        perf_pct_map["Daily Portfolio Performance"] = portfolio_pct_series
+
+        def _fmt_portfolio(abs_eur, pct):
+            if pd.isna(abs_eur) or pd.isna(pct):
+                return ""
+            p = round(float(pct), 2)
+            a = float(abs_eur)
+            sign = "+" if p > 0 else ""
+            if p == 0:
+                return f"€{a:.2f} (0.00%)"
+            return f"€{a:.2f} ({sign}{p:.2f}%)"
+        display_df["Daily Portfolio Performance"] = [
+            _fmt_portfolio(abs_change_series.iloc[i], portfolio_pct_series.iloc[i])
+            for i in range(len(display_df))
+        ]
+
         # Style positive as slight green hue, negative as slight red
         def _colorize(column):
             perf = perf_pct_map.get(column.name, pd.Series([None] * len(display_df)))
@@ -1586,9 +1695,30 @@ def historical_prices():
                     styles.append("color: #E26A6A; font-weight: 600;")
             return styles
 
-        styler = display_df.style.apply(_colorize, subset=selected_funds, axis=0)
+        # Highlight transaction days with a slight grey hue
+        def _highlight_transactions(column):
+            col_name = column.name
+            if col_name == "Daily Portfolio Performance" or col_name == "date":
+                return [""] * len(display_df)
+            tx_dates = tx_dates_by_fund.get(col_name, set())
+            styles = []
+            for d in display_df["date"].tolist():
+                if d in tx_dates:
+                    styles.append("background-color: rgba(180, 180, 180, 0.15);")
+                else:
+                    styles.append("")
+            return styles
+
+        # Style: per-fund colorization and transaction highlights; also include portfolio column colorization
+        styler = (
+            display_df.style
+            .apply(_colorize, subset=selected_funds + ["Daily Portfolio Performance"], axis=0)
+            .apply(_highlight_transactions, subset=selected_funds, axis=0)
+        )
 
         # Display formatted table using Styler
+        # Ensure portfolio column is shown at the rightmost position
+        display_df = display_df[["date"] + selected_funds + ["Daily Portfolio Performance"]]
         st.dataframe(styler, use_container_width=True)
     else:
         st.info("No historical data to display")
