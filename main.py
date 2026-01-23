@@ -1962,10 +1962,11 @@ def historical_prices():
                 return ""
             p = round(float(pct), 2)
             a = float(abs_eur)
-            sign = "+" if p > 0 else ""
+            sign = "+" if a > 0 else ""
             if p == 0:
                 return f"€{a:.2f} (0.00%)"
-            return f"€{a:.2f} ({sign}{p:.2f}%)"
+            pct_sign = "+" if p > 0 else ""
+            return f"{sign}€{a:.2f} ({pct_sign}{p:.2f}%)"
         display_df["Daily Portfolio Performance"] = [
             _fmt_portfolio(abs_change_series.iloc[i], portfolio_pct_series.iloc[i])
             for i in range(len(display_df))
@@ -1999,12 +2000,30 @@ def historical_prices():
                 else:
                     styles.append("")
             return styles
+        
+        # Add background color for Daily Portfolio Performance column
+        def _colorize_portfolio_background(column):
+            if column.name != "Daily Portfolio Performance":
+                return [""] * len(display_df)
+            perf = perf_pct_map.get("Daily Portfolio Performance", pd.Series([None] * len(display_df)))
+            styles = []
+            for i in range(len(display_df)):
+                p = perf.iloc[i]
+                p_fmt = None if pd.isna(p) else round(float(p), 2)
+                if p_fmt is None or p_fmt == 0:
+                    styles.append("")
+                elif p_fmt > 0:
+                    styles.append("background-color: rgba(107, 203, 119, 0.15); color: #4A9B57; font-weight: 600;")
+                else:
+                    styles.append("background-color: rgba(226, 106, 106, 0.15); color: #C94444; font-weight: 600;")
+            return styles
 
         # Style: per-fund colorization and transaction highlights; also include portfolio column colorization
         styler = (
             display_df.style
             .apply(_colorize, subset=selected_funds + ["Daily Portfolio Performance"], axis=0)
             .apply(_highlight_transactions, subset=selected_funds, axis=0)
+            .apply(_colorize_portfolio_background, subset=["Daily Portfolio Performance"], axis=0)
         )
 
         # Display formatted table using Styler
