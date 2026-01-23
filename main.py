@@ -183,6 +183,111 @@ def overview_and_charts():
     else:
         filter_funds = []
     
+    # ---------- REVENUE P&L CHART ----------
+    if len(transactions) > 0 and len(filter_funds) > 0:
+        st.subheader("💹 Revenue P&L")
+        
+        # Load historical data for price changes
+        hist_data = load_historical_prices()
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            # Calculate quantities held per fund (total from transactions)
+            qty_by_fund = transactions.groupby("Fund")["Quantity"].sum().to_dict()
+            
+            # Sort historical data chronologically
+            hist_sorted = hist_data.sort_values("date").reset_index(drop=True)
+            hist_sorted["date"] = pd.to_datetime(hist_sorted["date"])
+            
+            # Calculate daily price changes and cumulative P&L per fund
+            pnl_data = []
+            for idx in range(1, len(hist_sorted)):
+                date_current = hist_sorted.iloc[idx]["date"]
+                cumulative_portfolio = 0.0
+                fund_pnls = {}
+                
+                for fund in filter_funds:
+                    if fund in hist_sorted.columns and fund in qty_by_fund:
+                        qty = qty_by_fund[fund]
+                        prices = pd.to_numeric(hist_sorted[fund], errors="coerce")
+                        
+                        # Daily change from previous row
+                        if pd.notna(prices.iloc[idx]) and pd.notna(prices.iloc[idx-1]):
+                            daily_change = qty * (prices.iloc[idx] - prices.iloc[idx-1])
+                            fund_pnls[fund] = daily_change
+                            cumulative_portfolio += daily_change
+                
+                pnl_data.append({
+                    "date": date_current,
+                    "Portfolio": cumulative_portfolio,
+                    **fund_pnls
+                })
+            
+            if pnl_data:
+                pnl_df = pd.DataFrame(pnl_data)
+                
+                # Calculate cumulative sums
+                pnl_df["Portfolio"] = pnl_df["Portfolio"].cumsum()
+                for fund in filter_funds:
+                    if fund in pnl_df.columns:
+                        pnl_df[fund] = pnl_df[fund].fillna(0).cumsum()
+                
+                # Create line chart
+                fig_pnl = go.Figure()
+                
+                # Portfolio total line (bold)
+                fig_pnl.add_trace(go.Scatter(
+                    x=pnl_df["date"],
+                    y=pnl_df["Portfolio"],
+                    mode="lines",
+                    name="Portfolio Total",
+                    line=dict(color="#667eea", width=3),
+                    hovertemplate="<b>Portfolio Total</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
+                ))
+                
+                # Individual fund lines
+                for fund in filter_funds:
+                    if fund in pnl_df.columns:
+                        fig_pnl.add_trace(go.Scatter(
+                            x=pnl_df["date"],
+                            y=pnl_df[fund],
+                            mode="lines",
+                            name=fund,
+                            line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
+                            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
+                        ))
+                
+                fig_pnl.update_layout(
+                    height=400,
+                    hovermode="x unified",
+                    xaxis_title="",
+                    yaxis_title="Cumulative P&L (€)",
+                    template="plotly_white",
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    dragmode="pan",
+                    uirevision="revenue_pnl"
+                )
+                fig_pnl.update_xaxes(
+                    rangeslider=dict(visible=True, thickness=0.05),
+                    showspikes=True,
+                    spikemode="across"
+                )
+                fig_pnl.update_yaxes(
+                    showspikes=True,
+                    spikemode="across",
+                    zeroline=True,
+                    zerolinecolor="rgba(150,150,150,0.3)",
+                    zerolinewidth=1
+                )
+                
+                st.plotly_chart(fig_pnl, use_container_width=True, config=dict(
+                    scrollZoom=True,
+                    displaylogo=False,
+                    doubleClick="reset",
+                    toImageButtonOptions=dict(format="png", filename="revenue_pnl", height=600, width=1200, scale=2)
+                ))
+        
+        st.divider()
+    
     if len(transactions) > 0:
         df = transactions.copy()
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
@@ -1079,14 +1184,8 @@ def transaction_history():
                         if len(latest_price) > 0 and pd.notna(latest_price[0]):
                             pl_qty_approx_now += delta_qty * latest_price[0]
 
-        # Avg NAV (only when one fund selected)
-        if len(filter_funds) == 1:
-            total_quantity = trans_df["Quantity"].sum()
-            total_gross_contrib = (trans_df["Quantity"] * trans_df["Price (€)"]).sum()
-            avg_nav = total_gross_contrib / total_quantity if total_quantity > 0 else 0
-            avg_nav_display = f"€ {avg_nav:,.2f}"
-        else:
-            avg_nav_display = "-"
+        # Count number of contributions (transactions)
+        num_contributions = len(trans_df)
 
         # Display totals in 2 rows x 3 columns
         row1_col1, row1_col2, row1_col3 = st.columns(3)
@@ -1104,7 +1203,7 @@ def transaction_history():
             pl_qty_display = f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})" if latest_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
             st.metric(f"P/L Quantity approx. (as of {latest_date_str})", pl_qty_display)
         with row2_col3:
-            st.metric("Avg NAV", avg_nav_display if avg_nav_display else "-")
+            st.metric("# of Contributions", f"{num_contributions}")
     else:
         st.info("No transactions yet")
 
