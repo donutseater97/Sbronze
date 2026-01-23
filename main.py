@@ -416,7 +416,7 @@ def overview_and_charts():
             st.metric(
                 "Total Fees",
                 f"€ {total_fees:,.2f}",
-                delta=f"{total_fees_pct:.2f}%",
+                delta=f"↓ {total_fees_pct:.2f}%",
                 delta_color="off",
             )
 
@@ -497,6 +497,17 @@ def overview_and_charts():
                         market_value_by_date.append({"date": hist_date, "market_value": mv})
             
             market_value_df = pd.DataFrame(market_value_by_date) if market_value_by_date else pd.DataFrame()
+
+            # Extend Gross Contribution line horizontally to latest historical date
+            if len(hist_data) > 0 and "date" in hist_data.columns and len(stair_df) > 0:
+                latest_hist_date = pd.to_datetime(hist_data["date"], errors="coerce").max()
+                latest_stair_date = pd.to_datetime(stair_df["date_dt"], errors="coerce").max()
+                if pd.notna(latest_hist_date) and pd.notna(latest_stair_date) and latest_hist_date > latest_stair_date:
+                    last_value = stair_df["Gross Contribution"].iloc[-1]
+                    stair_df = pd.concat([
+                        stair_df,
+                        pd.DataFrame({"date_dt": [latest_hist_date], "Gross Contribution": [last_value]})
+                    ], ignore_index=True)
             
             # Create side-by-side layout
             col_pie, col_evolution = st.columns([1, 1.2])
@@ -525,9 +536,12 @@ def overview_and_charts():
                     values=alloc["Value"],
                     hole=0.4,
                     marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc["Category"]]),
+                    textposition="inside",
+                    textinfo="percent",
+                    textfont=dict(size=18, color="white"),
                     hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
                 )])
-                fig_alloc.update_layout(height=450, showlegend=False, hovermode="closest")
+                fig_alloc.update_layout(height=450, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
                 st.plotly_chart(fig_alloc, use_container_width=True)
 
                 # Legend centered below the allocation chart
@@ -964,7 +978,7 @@ def transaction_history():
         with row1_col2:
             st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
         with row1_col3:
-            st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"{fees_pct:.2f}%", delta_color="off")
+            st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"↓{fees_pct:.2f}%", delta_color="off")
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
@@ -1536,9 +1550,42 @@ def historical_prices():
         header_css += "</style>\n"
         st.markdown(header_css, unsafe_allow_html=True)
         
-        # Display formatted table
-        st.dataframe(historical_data_df, width="stretch", hide_index=True,
-                     column_config={col: st.column_config.NumberColumn(format="€%.2f") for col in selected_funds})
+        # Compute and format daily performance per fund
+        perf_pct_map = {}
+        display_df = historical_data_df.copy()
+        for col in selected_funds:
+            # pct_change compares current row to previous row (table is sorted desc)
+            perf = display_df[col].pct_change() * 100
+            perf_pct_map[col] = perf
+            def _fmt(val, p):
+                if pd.isna(val):
+                    return ""
+                if pd.isna(p) or p == 0:
+                    return f"€{val:.2f}"
+                sign = "+" if p > 0 else ""
+                return f"€{val:.2f} ({sign}{p:.2f}%)"
+            display_df[col] = [
+                _fmt(v, perf_pct_map[col].iloc[i]) for i, v in enumerate(display_df[col].values)
+            ]
+
+        # Style positive as slight green hue, negative as slight red
+        def _colorize(column):
+            perf = perf_pct_map.get(column.name, pd.Series([None] * len(display_df)))
+            styles = []
+            for i in range(len(display_df)):
+                p = perf.iloc[i]
+                if pd.isna(p) or p == 0:
+                    styles.append("")
+                elif p > 0:
+                    styles.append("color: #6BCB77; font-weight: 600;")
+                else:
+                    styles.append("color: #E26A6A; font-weight: 600;")
+            return styles
+
+        styler = display_df.style.apply(_colorize, subset=selected_funds, axis=0)
+
+        # Display formatted table using Styler
+        st.dataframe(styler, use_container_width=True)
     else:
         st.info("No historical data to display")
 
