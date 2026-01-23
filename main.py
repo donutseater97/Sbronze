@@ -41,6 +41,10 @@ def load_data():
 
     return funds, transactions
 
+# Force reload of data files by checking file modification time
+_funds_mtime = os.path.getmtime(FUNDS_FILE) if os.path.exists(FUNDS_FILE) else 0
+_transactions_mtime = os.path.getmtime(TRANSACTIONS_FILE) if os.path.exists(TRANSACTIONS_FILE) else 0
+
 funds, transactions = load_data()
 
 # Build FUND_COLORS and HISTORICAL_FUND_MAPPING from funds data
@@ -1109,7 +1113,9 @@ def historical_prices():
             pass
 
     # Ensure only known funds and date
-    fund_cols = [c for c in hist_df.columns if c in funds["Fund"].tolist()]
+    # Reload funds to catch any updates to funds.csv
+    funds_fresh = pd.read_csv(FUNDS_FILE) if os.path.exists(FUNDS_FILE) else funds
+    fund_cols = [c for c in hist_df.columns if c in funds_fresh["Fund"].tolist()]
     hist_df_display = hist_df[["date"] + fund_cols].copy()
     hist_df_display["date"] = pd.to_datetime(hist_df_display["date"]) 
 
