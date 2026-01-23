@@ -793,6 +793,10 @@ def overview_and_charts():
                     "Bond": "#1f77b4", "Equity": "#ff7f0e", "Mixed": "#2ca02c",
                     "Commodity": "#d62728", "Alternative": "#9467bd", "Other": "#8c564b"
                 }
+                asset_manager_palette = [
+                    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
+                ]
 
                 # Gross Contributions (left pie)
                 if alloc_by == "Fund":
@@ -812,7 +816,9 @@ def overview_and_charts():
                     alloc_gc = tmp.groupby("Asset Manager")["invested"].sum().reset_index()
                     alloc_gc = alloc_gc.sort_values("invested", ascending=False)
                     alloc_gc.columns = ["Category", "Value"]
-                    color_map = {cat: default_type_colors.get(cat, "#999999") for cat in alloc_gc["Category"]}
+                    color_map = {}
+                    for idx, cat in enumerate(alloc_gc["Category"].tolist()):
+                        color_map[cat] = asset_manager_palette[idx % len(asset_manager_palette)]
 
                 # Market Value (right pie) based on latest historical prices
                 hist_latest = load_historical_prices()
@@ -845,8 +851,9 @@ def overview_and_charts():
                     alloc_mv = mv_df.groupby("Asset Manager")["MV"].sum().reset_index().rename(columns={"Asset Manager": "Category", "MV": "Value"})
                     alloc_mv = alloc_mv.sort_values("Value", ascending=False)
                     # ensure color map includes asset managers
-                    for cat in alloc_mv["Category"].tolist():
-                        color_map.setdefault(cat, "#999999")
+                    next_idx = len(color_map)
+                    for idx, cat in enumerate(alloc_mv["Category"].tolist()):
+                        color_map.setdefault(cat, asset_manager_palette[(next_idx + idx) % len(asset_manager_palette)])
 
                 # Render two pies side by side
                 pie_left, pie_right = st.columns(2)
@@ -1942,55 +1949,56 @@ def historical_prices():
             ]
 
         # Add Daily Portfolio Performance column (absolute and percent)
-        # DPP(t) = Σ_f [quantity_f(t-1) × (price_f(t) - price_f(t-1))]
-        # Since table is sorted descending, row i is date t, row i+1 is date t-1
-        abs_change_list = []
-        portfolio_pct_list = []
-        
-        if len(transactions) > 0:
+        # Vectorized: DPP(t) = Σ_f [qty_f(t-1) × (price_f(t) - price_f(t-1))]
+        if len(transactions) > 0 and len(selected_funds) > 0:
+            hist_asc = historical_data_df[["date"] + selected_funds].copy()
+            hist_asc["date"] = pd.to_datetime(hist_asc["date"], errors="coerce")
+            hist_asc = hist_asc.sort_values("date").reset_index(drop=True)
+
             tx_sorted = transactions.copy()
             tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
             tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
-            
-            for i in range(len(display_df)):
-                current_date_str = display_df["date"].iloc[i]
-                current_date = pd.to_datetime(current_date_str)
-                
-                # Get the previous date (next row since descending)
-                if i + 1 < len(display_df):
-                    prev_date_str = display_df["date"].iloc[i + 1]
-                    prev_date = pd.to_datetime(prev_date_str)
-                    
-                    # Calculate quantity held at t-1 (prev_date) for each fund
-                    qty_at_prev = {}
-                    for fund in selected_funds:
-                        qty_at_prev[fund] = tx_sorted[(tx_sorted["Fund"] == fund) & (tx_sorted["Date"] <= prev_date)]["Quantity"].sum()
-                    
-                    # Calculate price changes and portfolio performance
-                    daily_change = 0.0
-                    prev_portfolio_value = 0.0
-                    
-                    for fund in selected_funds:
-                        qty = qty_at_prev.get(fund, 0.0)
-                        if qty > 0:
-                            current_price = pd.to_numeric(historical_data_df[fund].iloc[i], errors="coerce")
-                            prev_price = pd.to_numeric(historical_data_df[fund].iloc[i + 1], errors="coerce")
-                            
-                            if pd.notna(current_price) and pd.notna(prev_price):
-                                daily_change += qty * (current_price - prev_price)
-                                prev_portfolio_value += qty * prev_price
-                    
-                    abs_change_list.append(daily_change if prev_portfolio_value > 0 else pd.NA)
-                    portfolio_pct_list.append((daily_change / prev_portfolio_value * 100) if prev_portfolio_value > 0 else pd.NA)
-                else:
-                    abs_change_list.append(pd.NA)
-                    portfolio_pct_list.append(pd.NA)
+
+            qty_prev_df = pd.DataFrame({"date": hist_asc["date"]})
+            palette_idx = 0  # reused below
+
+            for fund in selected_funds:
+                fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
+                if len(fund_tx) == 0:
+                    qty_prev_df[fund] = 0.0
+                    continue
+                fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
+                merged = pd.merge_asof(
+                    hist_asc[["date"]],
+                    fund_tx[["Date", "cum_qty"]].sort_values("Date"),
+                    left_on="date",
+                    right_on="Date",
+                    direction="backward",
+                )
+                qty_series = merged["cum_qty"].fillna(0.0)
+                # quantity at t-1 (shift by one in ascending order)
+                qty_prev_df[fund] = qty_series.shift(1).fillna(0.0)
+
+            abs_change_cols = []
+            prev_value_cols = []
+            for fund in selected_funds:
+                price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
+                price_diff = price_col.diff()  # t - t-1 in ascending order
+                qty_prev = qty_prev_df[fund]
+                abs_change_cols.append(qty_prev * price_diff)
+                prev_value_cols.append(qty_prev * price_col.shift(1))
+
+            abs_change_series_asc = pd.DataFrame(abs_change_cols).sum(axis=0)
+            prev_value_series_asc = pd.DataFrame(prev_value_cols).sum(axis=0)
+            portfolio_pct_series_asc = (abs_change_series_asc / prev_value_series_asc.replace({0: pd.NA})) * 100
+
+            # Align back to descending order used in display_df/historical_data_df
+            abs_change_series = abs_change_series_asc.iloc[::-1].reset_index(drop=True)
+            portfolio_pct_series = portfolio_pct_series_asc.iloc[::-1].reset_index(drop=True)
         else:
-            abs_change_list = [pd.NA] * len(display_df)
-            portfolio_pct_list = [pd.NA] * len(display_df)
-        
-        abs_change_series = pd.Series(abs_change_list)
-        portfolio_pct_series = pd.Series(portfolio_pct_list)
+            abs_change_series = pd.Series([pd.NA] * len(display_df))
+            portfolio_pct_series = pd.Series([pd.NA] * len(display_df))
+
         perf_pct_map["Daily Portfolio Performance"] = portfolio_pct_series
 
         def _fmt_portfolio(abs_eur, pct):
