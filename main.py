@@ -1258,6 +1258,10 @@ def overview_and_charts():
     else:
         st.info("No transactions yet")
 
+def evolution_of_portfolio():
+    st.header("📊 Evolution of Portfolio")
+    st.info("Evolution of Portfolio page coming soon - detailed P/L and Market Value tracking with filters and totals.")
+
 def transaction_history():
     st.header("📜 Transaction History")
     
@@ -2377,12 +2381,14 @@ if "theme_dark" not in st.session_state:
 pg = st.navigation({
     "Sbronze Menu": [
         st.Page(overview_and_charts, title="📊 Overview & Charts"),
-        st.Page(transaction_history, title="📜 Transaction History"),
+        st.Page(evolution_of_portfolio, title="📊 Evolution of Portfolio"),
         st.Page(historical_prices, title="📈 Historical Data Charts"),
+        st.Page(transaction_history, title="📜 Transaction History"),
         st.Page(active_funds, title="📋 Active Funds"),
         st.Page(add_transactions_and_funds, title="➕ Add Transactions & Funds"),
     ]
 })
+
 
 
 # Custom CSS for navigation styling
