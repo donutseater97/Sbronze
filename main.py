@@ -17,6 +17,10 @@ OWNER_PASSWORD = "123"
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+# ---------- DATA MASKING STATE ----------
+if "data_masked" not in st.session_state:
+    st.session_state.data_masked = False
+
 # ---------- APP SETUP ----------
 st.set_page_config(page_title="Sbronze Treasure Hunt", layout="wide")
 st.title("📊 Sbronze Treasure Hunt")
@@ -126,9 +130,38 @@ def load_historical_prices():
     return df
 
 
+# ---------- DATA MASKING HELPERS ----------
+def fmt_currency(value):
+    """Format currency value with masking support."""
+    if st.session_state.data_masked:
+        return "***.*€"
+    if pd.isna(value):
+        return ""
+    return f"€{value:,.2f}"
 
+def fmt_percentage(value):
+    """Format percentage value with masking support."""
+    if st.session_state.data_masked:
+        return "***.*%"
+    if pd.isna(value):
+        return ""
+    sign = "+" if value > 0 else ""
+    return f"({sign}{value:.2f}%)"
 
-# ---------- SIDEBAR NAVIGATION ----------
+def fmt_number(value):
+    """Format number (quantity) with masking support."""
+    if st.session_state.data_masked:
+        return "***"
+    if pd.isna(value):
+        return ""
+    return f"{value:,.2f}"
+
+def mask_value(value, numeric=True):
+    """Generic masking function - returns masked or real value."""
+    if st.session_state.data_masked:
+        return "***" if numeric else "***.*€"
+    return value
+
 def overview_and_charts():
     # ---------- PORTFOLIO SUMMARY ----------
     st.header("📈 Portfolio Summary")
@@ -138,26 +171,8 @@ def overview_and_charts():
     with col_mask1:
         pass
     with col_mask2:
-        if "data_masked" not in st.session_state:
-            st.session_state.data_masked = False
         st.session_state.data_masked = st.toggle("🔒 Hide Data", value=st.session_state.data_masked, key="data_mask_toggle")
-    
-    # Helper function to format currency with masking
-    def fmt_currency(value):
-        if st.session_state.data_masked:
-            return "***.*€"
-        if pd.isna(value):
-            return ""
-        return f"€{value:,.2f}"
-    
-    def fmt_percentage(value):
-        if st.session_state.data_masked:
-            return "***.*%"
-        if pd.isna(value):
-            return ""
-        sign = "+" if value > 0 else ""
-        return f"({sign}{value:.2f}%)"
-    
+
     # Fund filter buttons
     if "portfolio_fund_filter" not in st.session_state:
         st.session_state.portfolio_fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []
@@ -383,18 +398,27 @@ def overview_and_charts():
         display_summary["_Net_Return_raw"] = summary["Net Return (€)"]
         display_summary["_MoM_raw"] = summary["MoM performance (%)"]
         
-        # Format numeric columns (leave Latest Price/Market Value for custom annotation below)
-        for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
-            display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
+        # Format numeric columns with masking support
+        if st.session_state.data_masked:
+            for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
+                display_summary[col] = "***.*€"
+        else:
+            for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
+                display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
 
         # Latest Price (€) with daily % annotation
         def _fmt_latest_price_row(row):
             fund = row["Fund"]
             price = summary.loc[summary["Fund"] == fund, "Latest Price (€)"].values[0]
-            base = f"€ {float(price):,.2f}" if pd.notna(price) else "€ 0.00"
+            if st.session_state.data_masked:
+                base = "***.*€"
+            else:
+                base = f"€ {float(price):,.2f}" if pd.notna(price) else "€ 0.00"
             pct = latest_pct_map.get(fund)
             if pct is None:
                 return base
+            if st.session_state.data_masked:
+                return "***.*€ (***.*%)"
             if pct == 0:
                 return f"{base} (0.00%)"
             sign = "+" if pct > 0 else ""
@@ -407,6 +431,8 @@ def overview_and_charts():
             mv = summary.loc[summary["Fund"] == fund, "Market Value (€)"].values[0]
             abs_change = latest_abs_change_map.get(fund)
             qty_val = qty_numeric[summary["Fund"] == fund].values[0] if fund in summary["Fund"].values else 0.0
+            if st.session_state.data_masked:
+                return "***.*€ (***.*€)"
             base = f"€ {float(mv):,.2f}" if pd.notna(mv) else "€ 0.00"
             if abs_change is None:
                 return base
@@ -414,8 +440,27 @@ def overview_and_charts():
             return f"{base} ({delta_eur:+.2f})"
         display_summary["Market Value (€)"] = display_summary.apply(_fmt_market_value_row, axis=1)
         
-        display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
-        display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(lambda x: f"{x:.2f}%")
+        if st.session_state.data_masked:
+            display_summary["MoM performance (%)"] = "***.*%"
+            display_summary["Weight (Mkt Value)"] = "***.*%"
+            display_summary["Quantity"] = "***"
+        else:
+            display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
+            display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(lambda x: f"{x:.2f}%")
+        
+        # Format Return columns with masking
+        if st.session_state.data_masked:
+            display_summary["Return [€ (%)]"] = "***.*€ (***.*%)"
+            display_summary["Net Return [€ (%)]"] = "***.*€ (***.*%)"
+        else:
+            # Format with actual values
+            def fmt_return_col(val):
+                if pd.isna(val):
+                    return ""
+                if isinstance(val, str):
+                    return val
+                return val
+            # The Return columns already have formatted values from summary
         
         # Store raw values for lookup
         raw_values = display_summary[["Fund", "_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"]].set_index("Fund")
@@ -476,19 +521,25 @@ def overview_and_charts():
         # Totals order: Return, Net Return, Fees, Gross Contributions, Market Value, Net Invested
         row1_col1, row1_col2, row1_col3 = st.columns(3)
         with row1_col1:
-            st.metric(
-                "Total Return",
-                f"€ {total_return:,.2f}",
-                delta=f"{total_return_pct:+.2f}%",
-                delta_color="normal",
-            )
+            if st.session_state.data_masked:
+                st.metric("Total Return", "***.*€", delta="***.*%", delta_color="normal")
+            else:
+                st.metric(
+                    "Total Return",
+                    f"€ {total_return:,.2f}",
+                    delta=f"{total_return_pct:+.2f}%",
+                    delta_color="normal",
+                )
         with row1_col2:
-            st.metric(
-                "Total Net Return",
-                f"€ {total_net_return:,.2f}",
-                delta=f"{total_net_return_pct:+.2f}%",
-                delta_color="normal",
-            )
+            if st.session_state.data_masked:
+                st.metric("Total Net Return", "***.*€", delta="***.*%", delta_color="normal")
+            else:
+                st.metric(
+                    "Total Net Return",
+                    f"€ {total_net_return:,.2f}",
+                    delta=f"{total_net_return_pct:+.2f}%",
+                    delta_color="normal",
+                )
         with row1_col3:
             portfolio_abs_delta = 0.0
             prev_portfolio_value = 0.0
@@ -500,7 +551,9 @@ def overview_and_charts():
                     portfolio_abs_delta += float(qty_val) * float(abs_change)
                 if prev_price is not None:
                     prev_portfolio_value += float(qty_val) * float(prev_price)
-            if prev_portfolio_value and prev_portfolio_value != 0:
+            if st.session_state.data_masked:
+                st.metric("Daily Portfolio Performance", "***.*€", delta="***.*%", delta_color="normal")
+            elif prev_portfolio_value and prev_portfolio_value != 0:
                 pct_delta = (portfolio_abs_delta / prev_portfolio_value) * 100.0
                 st.metric("Daily Portfolio Performance", f"€ {portfolio_abs_delta:,.2f}", delta=f"{pct_delta:+.2f}%", delta_color="normal")
             else:
@@ -508,20 +561,138 @@ def overview_and_charts():
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
-            st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
+            if st.session_state.data_masked:
+                st.metric("Total Gross Contributions", "***.*€")
+            else:
+                st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
         with row2_col2:
-            st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
+            if st.session_state.data_masked:
+                st.metric("Total Market Value", "***.*€")
+            else:
+                st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
         with row2_col3:
-            st.metric(
-                "Total Fees",
-                f"€ {total_fees:,.2f}",
-                delta=f"↓ {total_fees_pct:.2f}%",
-                delta_color="off",
-            )
+            if st.session_state.data_masked:
+                st.metric("Total Fees", "***.*€", delta="↓ ***.*%", delta_color="off")
+            else:
+                st.metric(
+                    "Total Fees",
+                    f"€ {total_fees:,.2f}",
+                    delta=f"↓ {total_fees_pct:.2f}%",
+                    delta_color="off",
+                )
 
 
     else:
         st.info("No transactions yet")
+
+    # ---------- DAILY PERFORMANCE TABLE ----------
+    st.divider()
+    st.header("📈 Daily Performance")
+    
+    if len(transactions) > 0 and len(filter_funds) > 0:
+        # Load historical prices for daily performance calculation
+        hist_data = load_historical_prices()
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            # Prepare historical data in ascending order for calculations
+            hist_asc = hist_data[["date"] + filter_funds].copy()
+            hist_asc["date"] = pd.to_datetime(hist_asc["date"], errors="coerce")
+            hist_asc = hist_asc.dropna(subset=["date"])
+            hist_asc = hist_asc.sort_values("date").reset_index(drop=True)
+
+            # Get transactions sorted by date
+            tx_sorted = transactions.copy()
+            tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+            tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
+
+            # Calculate quantity at t-1 for each date
+            qty_prev_df = pd.DataFrame({"date": hist_asc["date"]})
+
+            for fund in filter_funds:
+                fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
+                if len(fund_tx) == 0:
+                    qty_prev_df[fund] = 0.0
+                    continue
+                fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
+                merged = pd.merge_asof(
+                    hist_asc[["date"]],
+                    fund_tx[["Date", "cum_qty"]].sort_values("Date"),
+                    left_on="date",
+                    right_on="Date",
+                    direction="backward",
+                )
+                qty_series = merged["cum_qty"].fillna(0.0)
+                qty_prev_df[fund] = qty_series.shift(1).fillna(0.0)
+
+            # Calculate daily performance (absolute change in €)
+            daily_perf_df = hist_asc[["date"]].copy()
+            
+            for fund in filter_funds:
+                price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
+                price_diff = price_col.diff()  # t - t-1 in ascending order
+                qty_prev = qty_prev_df[fund]
+                daily_perf_df[f"{fund} (€)"] = qty_prev * price_diff
+                daily_perf_df[f"{fund} (%)"] = (price_diff / price_col.shift(1)) * 100
+
+            # Calculate daily portfolio performance
+            abs_change_series = pd.DataFrame([daily_perf_df[f"{f} (€)"] for f in filter_funds]).sum(axis=0)
+            daily_perf_df["Daily Total (€)"] = abs_change_series
+            
+            prev_portfolio_value = pd.DataFrame([qty_prev_df[f] * pd.to_numeric(hist_asc[f], errors="coerce").shift(1) for f in filter_funds]).sum(axis=0)
+            daily_perf_df["Daily Total (%)"] = (abs_change_series / prev_portfolio_value) * 100
+
+            # Sort descending by date for display
+            daily_perf_df = daily_perf_df.sort_values("date", ascending=False).reset_index(drop=True)
+            
+            # Format and mask display
+            display_daily = daily_perf_df[["date"]].copy()
+            display_daily.columns = ["Date"]
+            
+            for fund in filter_funds:
+                def fmt_daily(val, idx):
+                    if st.session_state.data_masked:
+                        return "***.*€"
+                    if pd.isna(val):
+                        return "-"
+                    sign = "+" if val > 0 else ""
+                    return f"{sign}€{val:.2f}"
+                
+                display_daily[fund] = [fmt_daily(daily_perf_df[f"{fund} (€)"].iloc[i], i) for i in range(len(daily_perf_df))]
+
+            # Add Daily Total
+            def fmt_total(val, idx):
+                if st.session_state.data_masked:
+                    return "***.*€"
+                if pd.isna(val):
+                    return "-"
+                sign = "+" if val > 0 else ""
+                return f"{sign}€{val:.2f}"
+            
+            display_daily["Daily Total"] = [fmt_total(daily_perf_df["Daily Total (€)"].iloc[i], i) for i in range(len(daily_perf_df))]
+            
+            # Color styling for Daily Total
+            def style_daily_perf(row):
+                styles = [""] * len(row)
+                # Find Daily Total column index
+                daily_total_col_idx = len(display_daily.columns) - 1
+                
+                idx = row.name
+                total_val = daily_perf_df["Daily Total (€)"].iloc[idx]
+                
+                if pd.isna(total_val) or total_val == 0:
+                    styles[daily_total_col_idx] = ""
+                elif total_val > 0:
+                    styles[daily_total_col_idx] = "background-color: rgba(107, 203, 119, 0.2); color: #2d6a3f; font-weight: 600;"
+                else:
+                    styles[daily_total_col_idx] = "background-color: rgba(226, 106, 106, 0.2); color: #8b2e2e; font-weight: 600;"
+                
+                return styles
+            
+            styled_daily = display_daily.style.apply(style_daily_perf, axis=1)
+            st.dataframe(styled_daily, width="stretch", hide_index=True)
+        else:
+            st.info("No historical data available for daily performance calculation.")
+    else:
+        st.info("No data available for daily performance.")
 
     # ---------- CHARTS ----------
     st.divider()
@@ -1960,6 +2131,8 @@ def historical_prices():
             perf = display_df[col].pct_change(periods=-1) * 100
             perf_pct_map[col] = perf
             def _fmt(val, p):
+                if st.session_state.data_masked:
+                    return "***.*€ (***.*%)"
                 if pd.isna(val):
                     return ""
                 if pd.isna(p):
@@ -1972,74 +2145,6 @@ def historical_prices():
             display_df[col] = [
                 _fmt(v, perf_pct_map[col].iloc[i]) for i, v in enumerate(display_df[col].values)
             ]
-
-        # Add Daily Portfolio Performance column (absolute and percent)
-        # Vectorized: DPP(t) = Σ_f [qty_f(t-1) × (price_f(t) - price_f(t-1))]
-        if len(transactions) > 0 and len(selected_funds) > 0:
-            hist_asc = historical_data_df[["date"] + selected_funds].copy()
-            hist_asc["date"] = pd.to_datetime(hist_asc["date"], errors="coerce")
-            hist_asc = hist_asc.sort_values("date").reset_index(drop=True)
-
-            tx_sorted = transactions.copy()
-            tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
-            tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
-
-            qty_prev_df = pd.DataFrame({"date": hist_asc["date"]})
-            palette_idx = 0  # reused below
-
-            for fund in selected_funds:
-                fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
-                if len(fund_tx) == 0:
-                    qty_prev_df[fund] = 0.0
-                    continue
-                fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
-                merged = pd.merge_asof(
-                    hist_asc[["date"]],
-                    fund_tx[["Date", "cum_qty"]].sort_values("Date"),
-                    left_on="date",
-                    right_on="Date",
-                    direction="backward",
-                )
-                qty_series = merged["cum_qty"].fillna(0.0)
-                # quantity at t-1 (shift by one in ascending order)
-                qty_prev_df[fund] = qty_series.shift(1).fillna(0.0)
-
-            abs_change_cols = []
-            prev_value_cols = []
-            for fund in selected_funds:
-                price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
-                price_diff = price_col.diff()  # t - t-1 in ascending order
-                qty_prev = qty_prev_df[fund]
-                abs_change_cols.append(qty_prev * price_diff)
-                prev_value_cols.append(qty_prev * price_col.shift(1))
-
-            abs_change_series_asc = pd.DataFrame(abs_change_cols).sum(axis=0)
-            prev_value_series_asc = pd.DataFrame(prev_value_cols).sum(axis=0)
-            portfolio_pct_series_asc = (abs_change_series_asc / prev_value_series_asc.replace({0: pd.NA})) * 100
-
-            # Align back to descending order used in display_df/historical_data_df
-            abs_change_series = abs_change_series_asc.iloc[::-1].reset_index(drop=True)
-            portfolio_pct_series = portfolio_pct_series_asc.iloc[::-1].reset_index(drop=True)
-        else:
-            abs_change_series = pd.Series([pd.NA] * len(display_df))
-            portfolio_pct_series = pd.Series([pd.NA] * len(display_df))
-
-        perf_pct_map["Daily Portfolio Performance"] = portfolio_pct_series
-
-        def _fmt_portfolio(abs_eur, pct):
-            if pd.isna(abs_eur) or pd.isna(pct):
-                return ""
-            p = round(float(pct), 2)
-            a = float(abs_eur)
-            sign = "+" if a > 0 else ""
-            if p == 0:
-                return f"€{a:.2f} (0.00%)"
-            pct_sign = "+" if p > 0 else ""
-            return f"{sign}€{a:.2f} ({pct_sign}{p:.2f}%)"
-        display_df["Daily Portfolio Performance"] = [
-            _fmt_portfolio(abs_change_series.iloc[i], portfolio_pct_series.iloc[i])
-            for i in range(len(display_df))
-        ]
 
         # Style positive as slight green hue, negative as slight red
         def _colorize(column):
@@ -2059,7 +2164,7 @@ def historical_prices():
         # Highlight transaction days with a slight grey hue
         def _highlight_transactions(column):
             col_name = column.name
-            if col_name == "Daily Portfolio Performance" or col_name == "date":
+            if col_name == "date":
                 return [""] * len(display_df)
             tx_dates = tx_dates_by_fund.get(col_name, set())
             styles = []
@@ -2069,35 +2174,16 @@ def historical_prices():
                 else:
                     styles.append("")
             return styles
-        
-        # Add background color for Daily Portfolio Performance column
-        def _colorize_portfolio_background(column):
-            if column.name != "Daily Portfolio Performance":
-                return [""] * len(display_df)
-            perf = perf_pct_map.get("Daily Portfolio Performance", pd.Series([None] * len(display_df)))
-            styles = []
-            for i in range(len(display_df)):
-                p = perf.iloc[i]
-                p_fmt = None if pd.isna(p) else round(float(p), 2)
-                if p_fmt is None or p_fmt == 0:
-                    styles.append("")
-                elif p_fmt > 0:
-                    styles.append("background-color: rgba(107, 203, 119, 0.15); color: #4A9B57; font-weight: 600;")
-                else:
-                    styles.append("background-color: rgba(226, 106, 106, 0.15); color: #C94444; font-weight: 600;")
-            return styles
 
-        # Style: per-fund colorization and transaction highlights; also include portfolio column colorization
+        # Style: per-fund colorization and transaction highlights
         styler = (
             display_df.style
-            .apply(_colorize, subset=selected_funds + ["Daily Portfolio Performance"], axis=0)
+            .apply(_colorize, subset=selected_funds, axis=0)
             .apply(_highlight_transactions, subset=selected_funds, axis=0)
-            .apply(_colorize_portfolio_background, subset=["Daily Portfolio Performance"], axis=0)
         )
 
-        # Display formatted table using Styler
-        # Ensure portfolio column is shown at the rightmost position
-        display_df = display_df[["date"] + selected_funds + ["Daily Portfolio Performance"]]
+        # Display formatted table
+        display_df = display_df[["date"] + selected_funds]
         st.dataframe(styler, use_container_width=True)
     else:
         st.info("No historical data to display")
