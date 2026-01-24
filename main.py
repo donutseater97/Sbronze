@@ -133,6 +133,31 @@ def overview_and_charts():
     # ---------- PORTFOLIO SUMMARY ----------
     st.header("📈 Portfolio Summary")
     
+    # Data masking toggle
+    col_mask1, col_mask2 = st.columns([3, 1])
+    with col_mask1:
+        pass
+    with col_mask2:
+        if "data_masked" not in st.session_state:
+            st.session_state.data_masked = False
+        st.session_state.data_masked = st.toggle("🔒 Hide Data", value=st.session_state.data_masked, key="data_mask_toggle")
+    
+    # Helper function to format currency with masking
+    def fmt_currency(value):
+        if st.session_state.data_masked:
+            return "***.*€"
+        if pd.isna(value):
+            return ""
+        return f"€{value:,.2f}"
+    
+    def fmt_percentage(value):
+        if st.session_state.data_masked:
+            return "***.*%"
+        if pd.isna(value):
+            return ""
+        sign = "+" if value > 0 else ""
+        return f"({sign}{value:.2f}%)"
+    
     # Fund filter buttons
     if "portfolio_fund_filter" not in st.session_state:
         st.session_state.portfolio_fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []

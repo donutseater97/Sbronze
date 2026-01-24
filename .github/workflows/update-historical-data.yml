@@ -8,7 +8,7 @@ on:
       - 'requirements.txt'
       - '.github/workflows/update-historical-data.yml'
   schedule:
-    - cron: '0 23 * * *' # Daily at 11:00 PM UTC = midnight Rome time
+    - cron: '0 * * * *' # Every hour
   workflow_dispatch: {}
 
 permissions:
