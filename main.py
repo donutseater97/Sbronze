@@ -45,18 +45,18 @@ def load_data():
 
     return funds, transactions
 
-# Force reload of data files by checking file modification time
-_funds_mtime = os.path.getmtime(FUNDS_FILE) if os.path.exists(FUNDS_FILE) else 0
-_transactions_mtime = os.path.getmtime(TRANSACTIONS_FILE) if os.path.exists(TRANSACTIONS_FILE) else 0
-
 funds, transactions = load_data()
 
 # Build FUND_COLORS and HISTORICAL_FUND_MAPPING from funds data
-for _, row in funds.iterrows():
-    FUND_COLORS[row["Fund"]] = row["Colour"]
+for row_index, entire_row in funds.iterrows():
+    FUND_COLORS[entire_row["Fund"]] = entire_row["Colour"]
 
 # Build Yahoo Finance tickers list (ticker + .F)
-yahoo_tickers = [f"{t}.F" for t in funds["Ticker"].dropna().unique()]
+yahoo_tickers = [f"{ticker}.F" for ticker in funds["Ticker"].dropna().unique()]
+
+# ---------- GLOBAL FUND FILTER ----------
+if "fund_filter" not in st.session_state:
+    st.session_state.fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []
 
 # ---------- GITHUB COMMIT HELPERS ----------
 
@@ -76,9 +76,9 @@ def github_get_file_sha(path: str) -> str | None:
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
     params = {"ref": GITHUB_BRANCH}
     headers = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
-    r = requests.get(url, headers=headers, params=params, timeout=30)
-    if r.status_code == 200:
-        return r.json().get("sha")
+    request_get = requests.get(url, headers=headers, params=params, timeout=30)
+    if request_get.status_code == 200:
+        return request_get.json().get("sha")
     return None
 
 def github_put_file(path: str, content_str: str, message: str) -> bool:
@@ -94,8 +94,8 @@ def github_put_file(path: str, content_str: str, message: str) -> bool:
     }
     if sha:
         data["sha"] = sha
-    r = requests.put(url, headers=headers, json=data, timeout=30)
-    return 200 <= r.status_code < 300
+    request_put = requests.put(url, headers=headers, json=data, timeout=30)
+    return 200 <= request_put.status_code < 300
 
 # ---------- HISTORICAL PRICES DATA FETCHING (CSV cache) ----------
 
@@ -106,72 +106,63 @@ def load_historical_prices():
         return pd.DataFrame()
 
     try:
-        df = pd.read_csv("historical_data.csv")
+        df_historical_data = pd.read_csv("historical_data.csv")
     except Exception as exc:  # pragma: no cover
         st.error(f"Could not read historical_data.csv: {exc}")
         return pd.DataFrame()
 
     # Normalize column names for UI
-    if "Date" in df.columns:
-        df = df.rename(columns={"Date": "date"})
+    if "Date" in df_historical_data.columns:
+        df_historical_data = df_historical_data.rename(columns={"Date": "date"})
 
     # Date column is already tz-naive from get_historical_data.py (converted to Europe/Rome)
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    if "date" in df_historical_data.columns:
+        df_historical_data["date"] = pd.to_datetime(df_historical_data["date"], errors="coerce")
 
     # Map ticker columns to fund names (e.g., 0P0001CRXW.F -> US)
-    for _, row in funds.iterrows():
-        ticker = row["Ticker"]
-        fund_name = row["Fund"]
+    for row_index, row_from_historical_data in funds.iterrows():
+        ticker = row_from_historical_data["Ticker"]
+        fund_name = row_from_historical_data["Fund"]
         yahoo_col = f"{ticker}.F"
-        if yahoo_col in df.columns:
-            df = df.rename(columns={yahoo_col: fund_name})
+        if yahoo_col in df_historical_data.columns:
+            df_historical_data = df_historical_data.rename(columns={yahoo_col: fund_name})
 
-    return df
+    return df_historical_data
+
+# ---------- GLOBAL HISTORICAL DATA AND LAST DATE ----------
+hist_data_global = load_historical_prices()
+if len(hist_data_global) > 0 and "date" in hist_data_global.columns:
+    _latest_hist_date = pd.to_datetime(hist_data_global["date"]).max()
+    last_date_str = _latest_hist_date.strftime("%Y-%m-%d") if pd.notna(_latest_hist_date) else "-"
+else:
+    last_date_str = "-"
 
 
 # ---------- DATA MASKING HELPERS ----------
-def fmt_currency(value):
-    """Format currency value with masking support."""
+def mask_value(value, value_type="number"):
     if st.session_state.data_masked:
-        return "***.*€"
+        if value_type == "currency":
+            return "***€"
+        elif value_type == "percentage":
+            return "***%"
+        else:
+            return "***"
+        
     if pd.isna(value):
         return ""
-    return f"€{value:,.2f}"
-
-def fmt_percentage(value):
-    """Format percentage value with masking support."""
-    if st.session_state.data_masked:
-        return "***.*%"
-    if pd.isna(value):
-        return ""
-    sign = "+" if value > 0 else ""
-    return f"({sign}{value:.2f}%)"
-
-def fmt_number(value):
-    """Format number (quantity) with masking support."""
-    if st.session_state.data_masked:
-        return "***"
-    if pd.isna(value):
-        return ""
-    return f"{value:,.2f}"
-
-def mask_value(value, numeric=True):
-    """Generic masking function - returns masked or real value."""
-    if st.session_state.data_masked:
-        return "***" if numeric else "***.*€"
-    return value
+    
+    if value_type == "currency":
+        return f"€{value:,.2f}"
+    elif value_type == "percentage":
+        sign = "+" if value > 0 else ""
+        return f"({sign}{value:.2f}%)"
+    else:
+        return f"{value:,.2f}"
 
 def overview_and_charts():
     # ---------- PORTFOLIO SUMMARY ----------
     # Get last date from historical data for title
-    hist_data_for_title = load_historical_prices()
-    last_date_str = "-"
-    if len(hist_data_for_title) > 0 and "date" in hist_data_for_title.columns:
-        last_date = pd.to_datetime(hist_data_for_title["date"]).max()
-        if pd.notna(last_date):
-            last_date_str = last_date.strftime("%Y-%m-%d")
-    
+    # Use global last_date_str for title
     st.header(f"📈 Portfolio Summary as of {last_date_str}")
     
     # Data masking toggle
@@ -181,23 +172,18 @@ def overview_and_charts():
     with col_mask2:
         st.session_state.data_masked = st.toggle("🔒 Hide Data", value=st.session_state.data_masked, key="data_mask_toggle")
 
-    # Fund filter buttons
-    if "portfolio_fund_filter" not in st.session_state:
-        st.session_state.portfolio_fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []
-    
+    # Fund filter buttons (global)
     if len(funds) > 0:
         st.markdown("**Filter by Fund:**")
-        
         # Generate custom CSS for fund buttons
         fund_button_css = "<style>"
         for fund in funds["Fund"].tolist():
             hex_color = FUND_COLORS.get(fund, "#999999")
-            # Convert hex to rgb
             if hex_color.startswith('#'):
                 hex_color = hex_color[1:]
             r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
             fund_button_css += f"""
-            button[data-testid="baseButton-primary"][aria-label="{fund}"] {{
+            button[data-testid=\"baseButton-primary\"][aria-label=\"{fund}\"] {{
                 background-color: rgba(200, 200, 200, 0.8) !important;
                 border: none !important;
                 color: rgb({r}, {g}, {b}) !important;
@@ -206,28 +192,28 @@ def overview_and_charts():
             """
         fund_button_css += "</style>"
         st.markdown(fund_button_css, unsafe_allow_html=True)
-        
+
         # Create columns for all buttons (fund buttons + reset button)
         num_cols = len(funds["Fund"].tolist()) + 1
         cols = st.columns(num_cols)
-        
+
         for idx, fund in enumerate(funds["Fund"].tolist()):
             with cols[idx]:
-                is_active = fund in st.session_state.portfolio_fund_filter
+                is_active = fund in st.session_state.fund_filter
                 hex_color = FUND_COLORS.get(fund, "#999999")
-                if st.button(fund, key=f"portfolio_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
+                if st.button(fund, key=f"fund_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
                     if is_active:
-                        st.session_state.portfolio_fund_filter.remove(fund)
+                        st.session_state.fund_filter.remove(fund)
                     else:
-                        st.session_state.portfolio_fund_filter.append(fund)
+                        st.session_state.fund_filter.append(fund)
                     st.rerun()
-        
+
         # Reset button in last column
         with cols[-1]:
-            if st.button("✕", key="reset_portfolio_filters", help="Reset filters", width="stretch"):
-                st.session_state.portfolio_fund_filter = funds["Fund"].tolist()
+            if st.button("✕", key="reset_fund_filters", help="Reset filters", width="stretch"):
+                st.session_state.fund_filter = funds["Fund"].tolist()
                 st.rerun()
-        filter_funds = st.session_state.portfolio_fund_filter
+        filter_funds = st.session_state.fund_filter
     else:
         filter_funds = []
     
@@ -264,7 +250,7 @@ def overview_and_charts():
         summary["Average NAV (€)"] = (summary["Gross Contributions (€)"] - summary["Fees (€)"]) / summary["Quantity"]
         
         # Get latest price from historical data
-        hist_data = load_historical_prices()
+        hist_data = hist_data_global
         last_hist_date = (
             pd.to_datetime(hist_data["date"]).max()
             if len(hist_data) > 0 and "date" in hist_data.columns
@@ -591,7 +577,7 @@ def overview_and_charts():
     
     if len(transactions) > 0 and len(filter_funds) > 0:
         # Load historical prices for performance calculation
-        hist_data = load_historical_prices()
+        hist_data = hist_data_global
         if len(hist_data) > 0 and "date" in hist_data.columns:
             # Prepare historical data in ascending order for calculations
             hist_asc = hist_data[["date"] + filter_funds].copy()
@@ -1265,9 +1251,8 @@ def evolution_of_portfolio():
 def transaction_history():
     st.header("📜 Transaction History")
     
-    # Fund filter buttons
-    if "trans_fund_filter" not in st.session_state:
-        st.session_state.trans_fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []
+    # Fund filter buttons (use global filter)
+    # (global filter `st.session_state.fund_filter` is initialized at app start)
     
     if len(funds) > 0:
         st.markdown("**Filter by Fund:**")
@@ -1297,21 +1282,21 @@ def transaction_history():
         
         for idx, fund in enumerate(funds["Fund"].tolist()):
             with cols[idx]:
-                is_active = fund in st.session_state.trans_fund_filter
+                is_active = fund in st.session_state.fund_filter
                 hex_color = FUND_COLORS.get(fund, "#999999")
-                if st.button(fund, key=f"trans_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
+                if st.button(fund, key=f"fund_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
                     if is_active:
-                        st.session_state.trans_fund_filter.remove(fund)
+                        st.session_state.fund_filter.remove(fund)
                     else:
-                        st.session_state.trans_fund_filter.append(fund)
+                        st.session_state.fund_filter.append(fund)
                     st.rerun()
         
         # Reset button in last column
         with cols[-1]:
-            if st.button("✕", key="reset_trans_filters", help="Reset filters", width="stretch"):
-                st.session_state.trans_fund_filter = funds["Fund"].tolist()
+            if st.button("✕", key="reset_fund_filters", help="Reset filters", width="stretch"):
+                st.session_state.fund_filter = funds["Fund"].tolist()
                 st.rerun()
-        filter_funds = st.session_state.trans_fund_filter
+        filter_funds = st.session_state.fund_filter
     else:
         filter_funds = []
     
@@ -1544,32 +1529,26 @@ def transaction_history():
         pl_price_approx = trans_df["Δ Net Inv vs Exp"].sum()
 
         # P/L Quantity approx: requires historical data
-        hist_data = load_historical_prices()
-        latest_date_str = "-"
+        hist_data = hist_data_global
         pl_qty_approx = 0.0
         pl_qty_approx_now = 0.0
 
         if len(hist_data) > 0 and "date" in hist_data.columns:
-            # Get latest date from historical data
+            # Use global last_date_str and latest date
             latest_date = pd.to_datetime(hist_data["date"]).max()
-            latest_date_str = latest_date.strftime("%Y-%m-%d") if pd.notna(latest_date) else "-"
-
             # For each transaction: delta_qty * row_price and delta_qty * latest_price
             for _, row in trans_df.iterrows():
                 fund = row["Fund"]
                 delta_qty_raw = row["Δ Quantity"]
                 row_price = row["Price (€)"]
-                
                 # Use displayed precision for delta qty (per fund)
                 dp = fund_qty_decimals.get(fund, 3)
                 delta_qty = round(delta_qty_raw, dp) if pd.notna(delta_qty_raw) else None
                 if delta_qty is not None and abs(delta_qty) < 10 ** (-dp):
                     delta_qty = 0.0
-
                 if pd.notna(delta_qty):
                     # Main calculation: delta_qty * row_price
                     pl_qty_approx += delta_qty * row_price
-                    
                     # Now calculation: delta_qty * latest_price
                     if fund in hist_data.columns:
                         latest_price = hist_data[hist_data["date"] == latest_date][fund].values
@@ -1592,8 +1571,8 @@ def transaction_history():
         with row2_col1:
             st.metric("P/L Price approx.", f"€ {pl_price_approx:+,.2f}")
         with row2_col2:
-            pl_qty_display = f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})" if latest_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
-            st.metric(f"P/L Quantity approx. (as of {latest_date_str})", pl_qty_display)
+            pl_qty_display = f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})" if last_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
+            st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display)
         with row2_col3:
             st.metric("# of Contributions", f"{num_contributions}")
     else:
@@ -1741,9 +1720,7 @@ def historical_prices():
     hist_df_display = hist_df[["date"] + fund_cols].copy()
     hist_df_display["date"] = pd.to_datetime(hist_df_display["date"]) 
 
-    # Fund filter buttons (same style as Transaction History)
-    if "historical_fund_filter" not in st.session_state:
-        st.session_state.historical_fund_filter = fund_cols
+    # Fund filter buttons (use global filter)
     if "hist_view_mode" not in st.session_state:
         st.session_state.hist_view_mode = "grid"
 
@@ -1770,18 +1747,18 @@ def historical_prices():
         cols = st.columns(num_cols)
         for idx, fund in enumerate(fund_cols):
             with cols[idx]:
-                is_active = fund in st.session_state.historical_fund_filter
-                if st.button(fund, key=f"hist_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
+                is_active = fund in st.session_state.fund_filter
+                if st.button(fund, key=f"fund_btn_{fund}", type="primary" if is_active else "secondary", width="stretch"):
                     if is_active:
-                        st.session_state.historical_fund_filter.remove(fund)
+                        st.session_state.fund_filter.remove(fund)
                     else:
-                        st.session_state.historical_fund_filter.append(fund)
+                        st.session_state.fund_filter.append(fund)
                     st.rerun()
         with cols[-1]:
-            if st.button("✕", key="reset_hist_filters", help="Reset filters", width="stretch"):
-                st.session_state.historical_fund_filter = fund_cols
+            if st.button("✕", key="reset_fund_filters", help="Reset filters", width="stretch"):
+                st.session_state.fund_filter = fund_cols
                 st.rerun()
-        selected_funds = st.session_state.historical_fund_filter
+        selected_funds = [f for f in st.session_state.fund_filter if f in fund_cols]
     else:
         selected_funds = []
 
