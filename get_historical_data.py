@@ -26,7 +26,7 @@ tickers = investgo_funds["Ticker"].tolist()
 ticker_to_fund = dict(zip(investgo_funds["Ticker"], investgo_funds["Fund"]))
 
 # Pair IDs for all tickers
-pair_ids = {t: get_pair_id([t])[0] for t in tickers}
+pair_ids = {ticker: get_pair_id([ticker])[0] for ticker in tickers}
 
 start_date = "01011990"  # earliest reasonable default
 end_date = datetime.now().strftime("%d%m%Y")
