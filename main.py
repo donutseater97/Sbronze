@@ -17,9 +17,7 @@ OWNER_PASSWORD = "123"
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
-# ---------- DATA MASKING STATE ----------
-if "data_masked" not in st.session_state:
-    st.session_state.data_masked = False
+
 
 # ---------- APP SETUP ----------
 st.set_page_config(page_title="Sbronze Treasure Hunt", layout="wide")
@@ -138,26 +136,7 @@ else:
     last_date_str = "-"
 
 
-# ---------- DATA MASKING HELPERS ----------
-def mask_value(value, value_type="number"):
-    if st.session_state.data_masked:
-        if value_type == "currency":
-            return "***€"
-        elif value_type == "percentage":
-            return "***%"
-        else:
-            return "***"
-        
-    if pd.isna(value):
-        return ""
-    
-    if value_type == "currency":
-        return f"€{value:,.2f}"
-    elif value_type == "percentage":
-        sign = "+" if value > 0 else ""
-        return f"({sign}{value:.2f}%)"
-    else:
-        return f"{value:,.2f}"
+
 
 def overview_and_charts():
     # ---------- PORTFOLIO SUMMARY ----------
@@ -165,12 +144,7 @@ def overview_and_charts():
     # Use global last_date_str for title
     st.header(f"📈 Portfolio Summary as of {last_date_str}")
     
-    # Data masking toggle
-    col_mask1, col_mask2 = st.columns([3, 1])
-    with col_mask1:
-        pass
-    with col_mask2:
-        st.session_state.data_masked = st.toggle("🔒 Hide Data", value=st.session_state.data_masked, key="data_mask_toggle")
+
 
     # Fund filter buttons (global)
     if len(funds) > 0:
@@ -392,27 +366,18 @@ def overview_and_charts():
         display_summary["_Net_Return_raw"] = summary["Net Return (€)"]
         display_summary["_MoM_raw"] = summary["MoM performance (%)"]
         
-        # Format numeric columns with masking support
-        if st.session_state.data_masked:
-            for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
-                display_summary[col] = "***.*€"
-        else:
-            for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
-                display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
+        # Format numeric columns
+        for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
+            display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
 
         # Latest Price (€) with daily % annotation
         def _fmt_latest_price_row(row):
             fund = row["Fund"]
             price = summary.loc[summary["Fund"] == fund, "Latest Price (€)"].values[0]
-            if st.session_state.data_masked:
-                base = "***.*€"
-            else:
-                base = f"€ {float(price):,.2f}" if pd.notna(price) else "€ 0.00"
+            base = f"€ {float(price):,.2f}" if pd.notna(price) else "€ 0.00"
             pct = latest_pct_map.get(fund)
             if pct is None:
                 return base
-            if st.session_state.data_masked:
-                return "***.*€ (***.*%)"
             if pct == 0:
                 return f"{base} (0.00%)"
             sign = "+" if pct > 0 else ""
@@ -423,32 +388,13 @@ def overview_and_charts():
         def _fmt_market_value_row(row):
             fund = row["Fund"]
             mv = summary.loc[summary["Fund"] == fund, "Market Value (€)"].values[0]
-            if st.session_state.data_masked:
-                return "***.*€"
             return f"€ {float(mv):,.2f}" if pd.notna(mv) else "€ 0.00"
         display_summary["Market Value (€)"] = display_summary.apply(_fmt_market_value_row, axis=1)
         
-        if st.session_state.data_masked:
-            display_summary["MoM performance (%)"] = "***.*%"
-            display_summary["Weight (Mkt Value)"] = "***.*%"
-            display_summary["Quantity"] = "***"
-        else:
-            display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
-            display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(lambda x: f"{x:.2f}%")
+        display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(lambda x: f"{x:.2f}%")
+        display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(lambda x: f"{x:.2f}%")
         
-        # Format Return columns with masking
-        if st.session_state.data_masked:
-            display_summary["Return [€ (%)]"] = "***.*€ (***.*%)"
-            display_summary["Net Return [€ (%)]"] = "***.*€ (***.*%)"
-        else:
-            # Format with actual values
-            def fmt_return_col(val):
-                if pd.isna(val):
-                    return ""
-                if isinstance(val, str):
-                    return val
-                return val
-            # The Return columns already have formatted values from summary
+        # Return columns already have formatted values from summary
         
         # Store raw values for lookup
         raw_values = display_summary[["Fund", "_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"]].set_index("Fund")
@@ -509,25 +455,19 @@ def overview_and_charts():
         # Totals order: Return, Net Return, Daily P/L, Gross Contributions, Market Value, Fees
         row1_col1, row1_col2, row1_col3 = st.columns(3)
         with row1_col1:
-            if st.session_state.data_masked:
-                st.metric("Total Return", "***.*€", delta="***.*%", delta_color="normal")
-            else:
-                st.metric(
-                    "Total Return",
-                    f"€ {total_return:,.2f}",
-                    delta=f"{total_return_pct:+.2f}%",
-                    delta_color="normal",
-                )
+            st.metric(
+                "Total Return",
+                f"€ {total_return:,.2f}",
+                delta=f"{total_return_pct:+.2f}%",
+                delta_color="normal",
+            )
         with row1_col2:
-            if st.session_state.data_masked:
-                st.metric("Total Net Return", "***.*€", delta="***.*%", delta_color="normal")
-            else:
-                st.metric(
-                    "Total Net Return",
-                    f"€ {total_net_return:,.2f}",
-                    delta=f"{total_net_return_pct:+.2f}%",
-                    delta_color="normal",
-                )
+            st.metric(
+                "Total Net Return",
+                f"€ {total_net_return:,.2f}",
+                delta=f"{total_net_return_pct:+.2f}%",
+                delta_color="normal",
+            )
         with row1_col3:
             # Daily P/L from Portfolio P/L Evolution table (last available date)
             if "pnl_df" in st.session_state and len(st.session_state.pnl_df) > 0:
@@ -535,9 +475,7 @@ def overview_and_charts():
                 daily_pnl_eur = pnl_df_latest.get("Daily P/L (€)")
                 daily_pnl_pct = pnl_df_latest.get("Daily P/L (%)")
                 
-                if st.session_state.data_masked:
-                    st.metric("Daily P/L", "***.*€", delta="***.*%", delta_color="normal")
-                elif pd.notna(daily_pnl_eur) and pd.notna(daily_pnl_pct):
+                if pd.notna(daily_pnl_eur) and pd.notna(daily_pnl_pct):
                     pct_sign = "+" if daily_pnl_pct > 0 else ""
                     st.metric("Daily P/L", f"€ {daily_pnl_eur:+,.2f}", delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal")
                 else:
@@ -547,264 +485,20 @@ def overview_and_charts():
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
-            if st.session_state.data_masked:
-                st.metric("Total Gross Contributions", "***.*€")
-            else:
-                st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
+            st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
         with row2_col2:
-            if st.session_state.data_masked:
-                st.metric("Total Market Value", "***.*€")
-            else:
-                st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
+            st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
         with row2_col3:
-            if st.session_state.data_masked:
-                st.metric("Total Fees", "***.*€", delta="↓ ***.*%", delta_color="off")
-            else:
-                st.metric(
-                    "Total Fees",
-                    f"€ {total_fees:,.2f}",
-                    delta=f"↓ {total_fees_pct:.2f}%",
-                    delta_color="off",
-                )
+            st.metric(
+                "Total Fees",
+                f"€ {total_fees:,.2f}",
+                delta=f"↓ {total_fees_pct:.2f}%",
+                delta_color="off",
+            )
 
 
     else:
         st.info("No transactions yet")
-
-    # ---------- EVOLUTION OF PORTFOLIO ----------
-    st.divider()
-    st.header("📊 Evolution of Portfolio")
-    
-    if len(transactions) > 0 and len(filter_funds) > 0:
-        # Load historical prices for performance calculation
-        hist_data = hist_data_global
-        if len(hist_data) > 0 and "date" in hist_data.columns:
-            # Prepare historical data in ascending order for calculations
-            hist_asc = hist_data[["date"] + filter_funds].copy()
-            hist_asc["date"] = pd.to_datetime(hist_asc["date"], errors="coerce")
-            hist_asc = hist_asc.dropna(subset=["date"])
-            hist_asc = hist_asc.sort_values("date").reset_index(drop=True)
-
-            # Get transactions sorted by date
-            tx_sorted = transactions.copy()
-            tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
-            tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
-
-            # Get first transaction date per fund
-            first_tx_date_by_fund = tx_sorted.groupby("Fund")["Date"].min().to_dict()
-
-            # Calculate quantity at t-1 for each date (for P/L calculation)
-            qty_prev_df = pd.DataFrame({"date": hist_asc["date"]})
-
-            for fund in filter_funds:
-                fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
-                if len(fund_tx) == 0:
-                    qty_prev_df[fund] = 0.0
-                    continue
-                fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
-                merged = pd.merge_asof(
-                    hist_asc[["date"]],
-                    fund_tx[["Date", "cum_qty"]].sort_values("Date"),
-                    left_on="date",
-                    right_on="Date",
-                    direction="backward",
-                )
-                qty_series = merged["cum_qty"].fillna(0.0)
-                qty_prev_df[fund] = qty_series.shift(1).fillna(0.0)
-
-            # Calculate daily P/L (absolute change in € per fund)
-            pnl_df = hist_asc[["date"]].copy()
-            
-            for fund in filter_funds:
-                price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
-                price_diff = price_col.diff()  # t - t-1 in ascending order
-                qty_prev = qty_prev_df[fund]
-                pnl_df[f"{fund} (€)"] = qty_prev * price_diff
-                pnl_df[f"{fund} (%)"] = (price_diff / price_col.shift(1)) * 100
-
-            # Calculate portfolio P/L (daily total)
-            abs_change_series = pd.DataFrame([pnl_df[f"{f} (€)"] for f in filter_funds]).sum(axis=0)
-            pnl_df["Daily P/L (€)"] = abs_change_series
-            
-            prev_portfolio_value = pd.DataFrame([qty_prev_df[f] * pd.to_numeric(hist_asc[f], errors="coerce").shift(1) for f in filter_funds]).sum(axis=0)
-            pnl_df["Daily P/L (%)"] = (abs_change_series / prev_portfolio_value.replace({0: pd.NA})) * 100
-
-            # Calculate daily Market Value (price * qty at t-1 for yesterday's holdings)
-            mv_df = hist_asc[["date"]].copy()
-            
-            for fund in filter_funds:
-                price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
-                qty_prev = qty_prev_df[fund]
-                # Market value = yesterday's quantity * today's price
-                mv_df[f"{fund} MV (€)"] = qty_prev * price_col
-                # MV change: today's MV - yesterday's MV
-                prev_price = price_col.shift(1)
-                mv_change = (qty_prev * price_col) - (qty_prev * prev_price)
-                mv_pct = (price_col / prev_price - 1) * 100
-                mv_df[f"{fund} MV Δ (€)"] = mv_change
-                mv_df[f"{fund} MV Δ (%)"] = mv_pct
-
-            # Calculate portfolio Market Value
-            total_mv = pd.DataFrame([mv_df[f"{f} MV (€)"] for f in filter_funds]).sum(axis=0)
-            prev_total_mv = total_mv.shift(1)
-            mv_df["Daily MV (€)"] = total_mv
-            mv_df["Daily MV Δ (€)"] = total_mv - prev_total_mv
-            mv_df["Daily MV Δ (%)"] = ((total_mv - prev_total_mv) / prev_total_mv.replace({0: pd.NA})) * 100
-
-            # Sort descending by date for display
-            pnl_df_display = pnl_df.sort_values("date", ascending=False).reset_index(drop=True)
-            mv_df_display = mv_df.sort_values("date", ascending=False).reset_index(drop=True)
-            
-            # ===== PORTFOLIO P/L EVOLUTION TABLE =====
-            st.subheader("💹 Portfolio P/L Evolution")
-            
-            display_pnl = pnl_df_display[["date"]].copy()
-            display_pnl["Date"] = display_pnl["date"].dt.strftime("%Y-%m-%d")
-            display_pnl = display_pnl.drop(columns=["date"])
-            
-            # Get first transaction date for each fund to filter rows
-            for fund in filter_funds:
-                first_date = first_tx_date_by_fund.get(fund)
-                if first_date:
-                    first_date = pd.to_datetime(first_date)
-                    
-                    def fmt_pnl(val, fund_name, hist_asc_local=hist_asc, pnl_df_local=pnl_df, first_date_local=first_date):
-                        if st.session_state.data_masked:
-                            return "***.*€"
-                        if pd.isna(val):
-                            return "-"
-                        sign = "+" if val > 0 else ""
-                        return f"{sign}€{val:.2f}"
-                    
-                    display_pnl[fund] = [
-                        fmt_pnl(pnl_df_display[f"{fund} (€)"].iloc[i], fund) 
-                        if pd.to_datetime(pnl_df_display["date"].iloc[i]) >= first_date else "-"
-                        for i in range(len(pnl_df_display))
-                    ]
-            
-            # Add Daily P/L column with special formatting: €value (%)
-            def fmt_daily_pnl(idx):
-                if st.session_state.data_masked:
-                    return "***.*€ (***.*%)"
-                eur = pnl_df_display["Daily P/L (€)"].iloc[idx]
-                pct = pnl_df_display["Daily P/L (%)"].iloc[idx]
-                if pd.isna(eur) or pd.isna(pct):
-                    return "-"
-                eur_sign = "+" if eur > 0 else ""
-                pct_sign = "+" if pct > 0 else ""
-                return f"{eur_sign}€{eur:.2f} ({pct_sign}{pct:.2f}%)"
-            
-            display_pnl["Daily P/L"] = [fmt_daily_pnl(i) for i in range(len(pnl_df_display))]
-            
-            # Style function for P/L table - green for positive, red for negative
-            def style_pnl_table(row):
-                styles = [""] * len(row)
-                idx = row.name
-                
-                # Color each fund column
-                for col_idx, fund in enumerate(filter_funds, start=1):
-                    val = pnl_df_display[f"{fund} (€)"].iloc[idx]
-                    if pd.isna(val) or val == 0:
-                        styles[col_idx] = ""
-                    elif val > 0:
-                        styles[col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f;"
-                    else:
-                        styles[col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e;"
-                
-                # Color Daily P/L column
-                daily_pnl_col_idx = len(filter_funds) + 1
-                daily_val = pnl_df_display["Daily P/L (€)"].iloc[idx]
-                if pd.isna(daily_val) or daily_val == 0:
-                    styles[daily_pnl_col_idx] = ""
-                elif daily_val > 0:
-                    styles[daily_pnl_col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f; font-weight: 600;"
-                else:
-                    styles[daily_pnl_col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e; font-weight: 600;"
-                
-                return styles
-            
-            styled_pnl = display_pnl.style.apply(style_pnl_table, axis=1)
-            st.dataframe(styled_pnl, width="stretch", hide_index=True)
-            
-            # ===== PORTFOLIO MARKET VALUE EVOLUTION TABLE =====
-            st.subheader("📈 Portfolio Market Value Evolution")
-            
-            display_mv = mv_df_display[["date"]].copy()
-            display_mv["Date"] = display_mv["date"].dt.strftime("%Y-%m-%d")
-            display_mv = display_mv.drop(columns=["date"])
-            
-            for fund in filter_funds:
-                first_date = first_tx_date_by_fund.get(fund)
-                if first_date:
-                    first_date = pd.to_datetime(first_date)
-                    
-                    def fmt_mv(val, pct_val, fund_name, first_date_local=first_date):
-                        if st.session_state.data_masked:
-                            return "***.*€ (***.*%)"
-                        if pd.isna(val) or pd.isna(pct_val):
-                            return "-"
-                        mv_sign = "+" if val > 0 else ""
-                        pct_sign = "+" if pct_val > 0 else ""
-                        return f"{mv_sign}€{val:.2f} ({pct_sign}{pct_val:.2f}%)"
-                    
-                    display_mv[fund] = [
-                        fmt_mv(mv_df_display[f"{fund} MV Δ (€)"].iloc[i], mv_df_display[f"{fund} MV Δ (%)"].iloc[i], fund)
-                        if pd.to_datetime(mv_df_display["date"].iloc[i]) >= first_date else "-"
-                        for i in range(len(mv_df_display))
-                    ]
-            
-            # Add Daily MV column
-            def fmt_daily_mv(idx):
-                if st.session_state.data_masked:
-                    return "***.*€ (***.*%)"
-                eur = mv_df_display["Daily MV Δ (€)"].iloc[idx]
-                pct = mv_df_display["Daily MV Δ (%)"].iloc[idx]
-                if pd.isna(eur) or pd.isna(pct):
-                    return "-"
-                eur_sign = "+" if eur > 0 else ""
-                pct_sign = "+" if pct > 0 else ""
-                return f"{eur_sign}€{eur:.2f} ({pct_sign}{pct:.2f}%)"
-            
-            display_mv["Daily MV"] = [fmt_daily_mv(i) for i in range(len(mv_df_display))]
-            
-            # Style function for MV table
-            def style_mv_table(row):
-                styles = [""] * len(row)
-                idx = row.name
-                
-                # Color each fund column
-                for col_idx, fund in enumerate(filter_funds, start=1):
-                    val = mv_df_display[f"{fund} MV Δ (€)"].iloc[idx]
-                    if pd.isna(val) or val == 0:
-                        styles[col_idx] = ""
-                    elif val > 0:
-                        styles[col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f;"
-                    else:
-                        styles[col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e;"
-                
-                # Color Daily MV column
-                daily_mv_col_idx = len(filter_funds) + 1
-                daily_val = mv_df_display["Daily MV Δ (€)"].iloc[idx]
-                if pd.isna(daily_val) or daily_val == 0:
-                    styles[daily_mv_col_idx] = ""
-                elif daily_val > 0:
-                    styles[daily_mv_col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f; font-weight: 600;"
-                else:
-                    styles[daily_mv_col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e; font-weight: 600;"
-                
-                return styles
-            
-            styled_mv = display_mv.style.apply(style_mv_table, axis=1)
-            st.dataframe(styled_mv, width="stretch", hide_index=True)
-            
-            # Store these dataframes in session state for use in Portfolio Summary and Revenue P/L
-            st.session_state.pnl_df = pnl_df_display
-            st.session_state.mv_df = mv_df_display
-        else:
-            st.info("No historical data available for evolution calculations.")
-    else:
-        st.info("No data available for portfolio evolution.")
-
 
     # ---------- CHARTS ----------
     st.divider()
@@ -813,148 +507,193 @@ def overview_and_charts():
     # ---------- REVENUE P&L CHART (Based on Portfolio Market Value Evolution) ----------
     if len(transactions) > 0 and len(filter_funds) > 0:
         st.subheader("💹 Revenue P&L")
+        st.caption("Shows your portfolio market value over time, starting from your first transaction")
         
-        # Use the market value evolution data if available
-        if "mv_df" in st.session_state and len(st.session_state.mv_df) > 0:
-            mv_df_chart = st.session_state.mv_df.copy()
-            # Sort ascending for cumulative calculations
-            mv_df_chart = mv_df_chart.sort_values("date", ascending=True).reset_index(drop=True)
-            mv_df_chart["date"] = pd.to_datetime(mv_df_chart["date"])
+        # Load historical prices for performance calculation
+        hist_data = hist_data_global
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            # Get first transaction date across ALL transactions (not just filtered)
+            first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
             
-            # Calculate cumulative market value (starting from first transaction)
-            fig_revenue = go.Figure()
+            # Prepare historical data from first transaction onwards
+            hist_asc = hist_data[["date"] + filter_funds].copy()
+            hist_asc["date"] = pd.to_datetime(hist_asc["date"], errors="coerce")
+            hist_asc = hist_asc.dropna(subset=["date"])
+            hist_asc = hist_asc[hist_asc["date"] >= first_tx_date].sort_values("date").reset_index(drop=True)
             
-            # Get latest date for reference
-            latest_date = mv_df_chart["date"].max()
-            
-            # Add total market value line
-            fig_revenue.add_trace(go.Scatter(
-                x=mv_df_chart["date"],
-                y=mv_df_chart["Daily MV (€)"],
-                mode="lines",
-                name="Portfolio MV",
-                line=dict(color="#667eea", width=3),
-                fill="tozeroy",
-                fillcolor="rgba(102, 126, 234, 0.1)",
-                hovertemplate="<b>Portfolio Market Value</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
-            ))
-            
-            # Add annotation for last point
-            last_mv = mv_df_chart["Daily MV (€)"].iloc[-1]
-            fig_revenue.add_annotation(
-                x=latest_date,
-                y=last_mv,
-                text=f"€{last_mv:,.0f}",
-                showarrow=False,
-                xanchor="left",
-                xshift=10,
-                font=dict(size=14, color="#667eea"),
-                bordercolor="#667eea",
-                borderwidth=2,
-                borderpad=4,
-                bgcolor="rgba(255,255,255,0)"
-            )
-            
-            # Add individual fund lines
-            for fund in filter_funds:
-                fund_col = f"{fund} MV (€)"
-                if fund_col in mv_df_chart.columns:
-                    fig_revenue.add_trace(go.Scatter(
-                        x=mv_df_chart["date"],
-                        y=mv_df_chart[fund_col],
-                        mode="lines",
-                        name=fund,
-                        line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
-                        hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
-                    ))
-                    
-                    # Add annotation for last point
-                    last_fund_mv = mv_df_chart[fund_col].iloc[-1]
-                    fig_revenue.add_annotation(
-                        x=latest_date,
-                        y=last_fund_mv,
-                        text=f"€{last_fund_mv:,.0f}",
-                        showarrow=False,
-                        xanchor="left",
-                        xshift=10,
-                        font=dict(size=13, color=FUND_COLORS.get(fund, "#999999")),
-                        bordercolor=FUND_COLORS.get(fund, "#999999"),
-                        borderwidth=1.5,
-                        borderpad=4,
-                        bgcolor="rgba(255,255,255,0)"
+            if len(hist_asc) == 0:
+                st.info("No historical data available after your first transaction date.")
+            else:
+                # Get transactions sorted by date
+                tx_sorted = transactions.copy()
+                tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+                tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
+
+                # Calculate quantity at each date for each fund
+                qty_prev_df = pd.DataFrame({"date": hist_asc["date"]})
+
+                for fund in filter_funds:
+                    fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
+                    if len(fund_tx) == 0:
+                        qty_prev_df[fund] = 0.0
+                        continue
+                    fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
+                    merged = pd.merge_asof(
+                        hist_asc[["date"]],
+                        fund_tx[["Date", "cum_qty"]].sort_values("Date"),
+                        left_on="date",
+                        right_on="Date",
+                        direction="backward",
                     )
-            
-            # Calculate y-axis range
-            all_mv_values = [mv_df_chart["Daily MV (€)"].min(), mv_df_chart["Daily MV (€)"].max()]
-            for fund in filter_funds:
-                fund_col = f"{fund} MV (€)"
-                if fund_col in mv_df_chart.columns:
-                    all_mv_values.extend([mv_df_chart[fund_col].min(), mv_df_chart[fund_col].max()])
-            
-            max_mv = max(all_mv_values) if all_mv_values else 1000
-            min_mv = min(all_mv_values) if all_mv_values else 0
-            padding = (max_mv - min_mv) * 0.05
-            
-            fig_revenue.update_layout(
-                height=600,
-                hovermode="x unified",
-                xaxis_title="",
-                yaxis_title="Market Value (€)",
-                template="plotly_white",
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                dragmode="pan",
-                uirevision="revenue_pnl",
-                newshape=dict(line_color="#888888"),
-                margin=dict(r=100),
-                yaxis=dict(range=[min_mv - padding, max_mv + padding])
-            )
-            
-            fig_revenue.update_xaxes(
-                rangeslider=dict(visible=True, thickness=0.07),
-                rangeselector=dict(
-                    buttons=[
-                        dict(count=1, label="1M", step="month", stepmode="backward"),
-                        dict(count=3, label="3M", step="month", stepmode="backward"),
-                        dict(count=6, label="6M", step="month", stepmode="backward"),
-                        dict(count=1, label="YTD", step="year", stepmode="todate"),
-                        dict(count=1, label="1Y", step="year", stepmode="backward"),
-                        dict(step="all", label="All"),
-                    ]
-                ),
-                showspikes=True,
-                spikemode="across",
-                spikesnap="cursor",
-                spikethickness=1,
-                spikecolor="#888888"
-            )
-            
-            fig_revenue.update_yaxes(
-                rangemode="normal",
-                fixedrange=False,
-                showspikes=True,
-                spikemode="across",
-                zeroline=True,
-                zerolinecolor="rgba(150,150,150,0.5)",
-                zerolinewidth=2,
-            )
-            
-            st.plotly_chart(fig_revenue, use_container_width=True, config=dict(
-                scrollZoom=True,
-                displaylogo=False,
-                doubleClick="reset",
-                modeBarButtonsToAdd=[
-                    "drawline",
-                    "eraseshape",
-                    "zoom2d",
-                    "pan2d",
-                    "select2d",
-                    "lasso2d",
-                ],
-                toImageButtonOptions=dict(format="png", filename="revenue_pnl", height=600, width=1200, scale=2)
-            ))
+                    qty_series = merged["cum_qty"].fillna(0.0)
+                    qty_prev_df[fund] = qty_series.shift(1).fillna(0.0)
+
+                # Calculate daily Market Value
+                mv_df = hist_asc[["date"]].copy()
+                
+                for fund in filter_funds:
+                    price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
+                    qty_prev = qty_prev_df[fund]
+                    mv_df[f"{fund} MV (€)"] = qty_prev * price_col
+
+                # Calculate portfolio Market Value
+                total_mv = pd.DataFrame([mv_df[f"{f} MV (€)"] for f in filter_funds]).sum(axis=0)
+                mv_df["Daily MV (€)"] = total_mv
+                
+                # Create chart
+                fig_revenue = go.Figure()
+                
+                # Get latest date for reference
+                latest_date = mv_df["date"].max()
+                
+                # Add total market value line
+                fig_revenue.add_trace(go.Scatter(
+                    x=mv_df["date"],
+                    y=mv_df["Daily MV (€)"],
+                    mode="lines",
+                    name="Portfolio MV",
+                    line=dict(color="#667eea", width=3),
+                    fill="tozeroy",
+                    fillcolor="rgba(102, 126, 234, 0.1)",
+                    hovertemplate="<b>Portfolio Market Value</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>"
+                ))
+                
+                # Add annotation for last point
+                last_mv = mv_df["Daily MV (€)"].iloc[-1]
+                fig_revenue.add_annotation(
+                    x=latest_date,
+                    y=last_mv,
+                    text=f"€{last_mv:,.0f}",
+                    showarrow=False,
+                    xanchor="left",
+                    xshift=10,
+                    font=dict(size=14, color="#667eea"),
+                    bordercolor="#667eea",
+                    borderwidth=2,
+                    borderpad=4,
+                    bgcolor="rgba(255,255,255,0)"
+                )
+                
+                # Add individual fund lines
+                for fund in filter_funds:
+                    fund_col = f"{fund} MV (€)"
+                    if fund_col in mv_df.columns:
+                        fig_revenue.add_trace(go.Scatter(
+                            x=mv_df["date"],
+                            y=mv_df[fund_col],
+                            mode="lines",
+                            name=fund,
+                            line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2, dash="dot"),
+                            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
+                        ))
+                        
+                        # Add annotation for last point
+                        last_fund_mv = mv_df[fund_col].iloc[-1]
+                        fig_revenue.add_annotation(
+                            x=latest_date,
+                            y=last_fund_mv,
+                            text=f"€{last_fund_mv:,.0f}",
+                            showarrow=False,
+                            xanchor="left",
+                            xshift=10,
+                            font=dict(size=13, color=FUND_COLORS.get(fund, "#999999")),
+                            bordercolor=FUND_COLORS.get(fund, "#999999"),
+                            borderwidth=1.5,
+                            borderpad=4,
+                            bgcolor="rgba(255,255,255,0)"
+                        )
+                
+                # Calculate y-axis range
+                all_mv_values = [mv_df["Daily MV (€)"].min(), mv_df["Daily MV (€)"].max()]
+                for fund in filter_funds:
+                    fund_col = f"{fund} MV (€)"
+                    if fund_col in mv_df.columns:
+                        all_mv_values.extend([mv_df[fund_col].min(), mv_df[fund_col].max()])
+                
+                max_mv = max(all_mv_values) if all_mv_values else 1000
+                min_mv = min(all_mv_values) if all_mv_values else 0
+                padding = (max_mv - min_mv) * 0.05
+                
+                fig_revenue.update_layout(
+                    height=600,
+                    hovermode="x unified",
+                    xaxis_title="",
+                    yaxis_title="Market Value (€)",
+                    template="plotly_white",
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    dragmode="pan",
+                    uirevision="revenue_pnl",
+                    newshape=dict(line_color="#888888"),
+                    margin=dict(r=100),
+                    yaxis=dict(range=[min_mv - padding, max_mv + padding])
+                )
+                
+                fig_revenue.update_xaxes(
+                    rangeslider=dict(visible=True, thickness=0.07),
+                    rangeselector=dict(
+                        buttons=[
+                            dict(count=1, label="1M", step="month", stepmode="backward"),
+                            dict(count=3, label="3M", step="month", stepmode="backward"),
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="YTD", step="year", stepmode="todate"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(step="all", label="All"),
+                        ]
+                    ),
+                    showspikes=True,
+                    spikemode="across",
+                    spikesnap="cursor",
+                    spikethickness=1,
+                    spikecolor="#888888"
+                )
+                
+                fig_revenue.update_yaxes(
+                    rangemode="normal",
+                    fixedrange=False,
+                    showspikes=True,
+                    spikemode="across",
+                    zeroline=True,
+                    zerolinecolor="rgba(150,150,150,0.5)",
+                    zerolinewidth=2,
+                )
+                
+                st.plotly_chart(fig_revenue, use_container_width=True, config=dict(
+                    scrollZoom=True,
+                    displaylogo=False,
+                    doubleClick="reset",
+                    modeBarButtonsToAdd=[
+                        "drawline",
+                        "eraseshape",
+                        "zoom2d",
+                        "pan2d",
+                        "select2d",
+                        "lasso2d",
+                    ],
+                    toImageButtonOptions=dict(format="png", filename="revenue_pnl", height=600, width=1200, scale=2)
+                ))
         else:
-            st.info("Portfolio Market Value Evolution data not available yet.")
+            st.info("No historical data available.")
 
     
     if len(transactions) > 0:
@@ -1040,14 +779,14 @@ def overview_and_charts():
                 st.subheader("💰 Allocation")
                 alloc_by = st.selectbox("Group by:", ["Fund", "Type", "Asset Manager"], key="alloc_selectbox")
 
-                # Colors per category
+                # Colors per category - softer palette matching app
                 default_type_colors = {
-                    "Bond": "#1f77b4", "Equity": "#ff7f0e", "Mixed": "#2ca02c",
-                    "Commodity": "#d62728", "Alternative": "#9467bd", "Other": "#8c564b"
+                    "Bond": "#6B8CAE", "Equity": "#B8860B", "Mixed": "#6BA565",
+                    "Commodity": "#B8604B", "Alternative": "#8B6B9E", "Other": "#6B7480"
                 }
                 asset_manager_palette = [
-                    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-                    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"
+                    "#6B8CAE", "#B8860B", "#6BA565", "#B8604B", "#8B6B9E",
+                    "#6B7480", "#A85B8E", "#7A7A7A", "#998B3C", "#5B8FA3"
                 ]
 
                 # Gross Contributions (left pie)
@@ -1118,10 +857,10 @@ def overview_and_charts():
                         marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc_gc["Category"]]),
                         textinfo="percent",
                         textposition="inside",
-                        textfont=dict(size=16, color="white"),
+                        textfont=dict(size=14, color="#ffffff", family="system-ui"),
                         hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
                     )])
-                    fig_gc.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
+                    fig_gc.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="system-ui", size=12))
                     st.plotly_chart(fig_gc, use_container_width=True)
 
                 with pie_right:
@@ -1133,10 +872,10 @@ def overview_and_charts():
                         marker=dict(colors=[color_map.get(cat, "#999999") for cat in alloc_mv["Category"]]),
                         textinfo="percent",
                         textposition="inside",
-                        textfont=dict(size=16, color="white"),
+                        textfont=dict(size=14, color="#ffffff", family="system-ui"),
                         hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"
                     )])
-                    fig_mv.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="Arial Black"))
+                    fig_mv.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="system-ui", size=12))
                     st.plotly_chart(fig_mv, use_container_width=True)
 
                 # Unified legend centered below the pies
@@ -1246,7 +985,302 @@ def overview_and_charts():
 
 def evolution_of_portfolio():
     st.header("📊 Evolution of Portfolio")
-    st.info("Evolution of Portfolio page coming soon - detailed P/L and Market Value tracking with filters and totals.")
+    
+    # Initialize fund filter from session state
+    if "fund_filter" not in st.session_state or len(st.session_state.fund_filter) == 0:
+        filter_funds = funds["Fund"].tolist() if len(funds) > 0 else []
+    else:
+        filter_funds = st.session_state.fund_filter
+    
+    if len(transactions) > 0 and len(filter_funds) > 0:
+        # Load historical prices for performance calculation
+        hist_data = hist_data_global
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            # Prepare historical data in ascending order for calculations
+            hist_asc = hist_data[["date"] + filter_funds].copy()
+            hist_asc["date"] = pd.to_datetime(hist_asc["date"], errors="coerce")
+            hist_asc = hist_asc.dropna(subset=["date"])
+            hist_asc = hist_asc.sort_values("date").reset_index(drop=True)
+
+            # Get transactions sorted by date
+            tx_sorted = transactions.copy()
+            tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+            tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
+
+            # Get first transaction date per fund
+            first_tx_date_by_fund = tx_sorted.groupby("Fund")["Date"].min().to_dict()
+
+            # Calculate quantity at t-1 for each date (for P/L calculation)
+            qty_prev_df = pd.DataFrame({"date": hist_asc["date"]})
+
+            for fund in filter_funds:
+                fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
+                if len(fund_tx) == 0:
+                    qty_prev_df[fund] = 0.0
+                    continue
+                fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
+                merged = pd.merge_asof(
+                    hist_asc[["date"]],
+                    fund_tx[["Date", "cum_qty"]].sort_values("Date"),
+                    left_on="date",
+                    right_on="Date",
+                    direction="backward",
+                )
+                qty_series = merged["cum_qty"].fillna(0.0)
+                qty_prev_df[fund] = qty_series.shift(1).fillna(0.0)
+
+            # ===== PORTFOLIO P/L EVOLUTION TABLE - Daily NAV with (+change%) =====
+            st.subheader("💹 Portfolio P/L Evolution - Daily NAV")
+            st.caption("Shows the daily NAV (price) of each fund with percentage change from previous day")
+            
+            pnl_nav_df = hist_asc[["date"]].copy()
+            
+            # For each fund, show daily NAV with percentage change
+            for fund in filter_funds:
+                price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
+                pnl_nav_df[fund] = price_col
+                pnl_nav_df[f"{fund}_pct"] = price_col.pct_change() * 100
+            
+            # Sort descending by date for display
+            pnl_nav_display = pnl_nav_df.sort_values("date", ascending=False).reset_index(drop=True)
+            
+            # Format for display
+            display_pnl_nav = pnl_nav_display[["date"]].copy()
+            display_pnl_nav["Date"] = display_pnl_nav["date"].dt.strftime("%Y-%m-%d")
+            display_pnl_nav = display_pnl_nav.drop(columns=["date"])
+            
+            for fund in filter_funds:
+                first_date = first_tx_date_by_fund.get(fund)
+                if first_date:
+                    first_date = pd.to_datetime(first_date)
+                    
+                    def fmt_nav(idx, fund_name):
+                        nav_val = pnl_nav_display[fund_name].iloc[idx]
+                        pct_val = pnl_nav_display[f"{fund_name}_pct"].iloc[idx]
+                        
+                        if pd.isna(nav_val):
+                            return "-"
+                        
+                        nav_str = f"€{nav_val:.2f}"
+                        
+                        if pd.isna(pct_val) or pct_val == 0:
+                            return nav_str
+                        
+                        pct_sign = "+" if pct_val > 0 else ""
+                        return f"{nav_str} ({pct_sign}{pct_val:.2f}%)"
+                    
+                    display_pnl_nav[fund] = [
+                        fmt_nav(i, fund)
+                        if pd.to_datetime(pnl_nav_display["date"].iloc[i]) >= first_date else "-"
+                        for i in range(len(pnl_nav_display))
+                    ]
+            
+            # Style function for NAV table
+            def style_pnl_nav_table(row):
+                styles = [""] * len(row)
+                idx = row.name
+                
+                for col_idx, fund in enumerate(filter_funds, start=1):
+                    pct_val = pnl_nav_display[f"{fund}_pct"].iloc[idx]
+                    if pd.isna(pct_val) or pct_val == 0:
+                        styles[col_idx] = ""
+                    elif pct_val > 0:
+                        styles[col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f;"
+                    else:
+                        styles[col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e;"
+                
+                return styles
+            
+            styled_pnl_nav = display_pnl_nav.style.apply(style_pnl_nav_table, axis=1)
+            st.dataframe(styled_pnl_nav, width="stretch", hide_index=True)
+            
+            # Chart for P/L Evolution
+            st.subheader("📊 Daily NAV Evolution Chart")
+            fig_pnl_chart = go.Figure()
+            
+            pnl_nav_asc = pnl_nav_df.sort_values("date", ascending=True).reset_index(drop=True)
+            
+            for fund in filter_funds:
+                first_date = first_tx_date_by_fund.get(fund)
+                fund_data = pnl_nav_asc[pnl_nav_asc["date"] >= pd.to_datetime(first_date)] if first_date else pnl_nav_asc
+                
+                fig_pnl_chart.add_trace(go.Scatter(
+                    x=fund_data["date"],
+                    y=fund_data[fund],
+                    mode="lines",
+                    name=fund,
+                    line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
+                    hovertemplate=f"<b>{fund} NAV</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>"
+                ))
+            
+            fig_pnl_chart.update_layout(
+                height=500,
+                hovermode="x unified",
+                xaxis_title="Date",
+                yaxis_title="NAV (€)",
+                template="plotly_white",
+                showlegend=True,
+                legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.01),
+                dragmode="pan"
+            )
+            
+            fig_pnl_chart.update_xaxes(
+                rangeslider=dict(visible=True, thickness=0.07),
+                rangeselector=dict(
+                    buttons=[
+                        dict(count=1, label="1M", step="month", stepmode="backward"),
+                        dict(count=3, label="3M", step="month", stepmode="backward"),
+                        dict(count=6, label="6M", step="month", stepmode="backward"),
+                        dict(count=1, label="1Y", step="year", stepmode="backward"),
+                        dict(step="all", label="All"),
+                    ]
+                )
+            )
+            
+            st.plotly_chart(fig_pnl_chart, use_container_width=True)
+            
+            st.divider()
+            
+            # ===== PORTFOLIO MARKET VALUE EVOLUTION TABLE - NOT showing NAV, only market value (+change€) =====
+            st.subheader("📈 Portfolio Market Value Evolution - Daily Holdings Value")
+            st.caption("Shows the market value of your holdings (quantity held × daily NAV) with € change from previous day")
+            
+            mv_df = hist_asc[["date"]].copy()
+            
+            for fund in filter_funds:
+                price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
+                qty_prev = qty_prev_df[fund]
+                # Market value = quantity held * today's price
+                mv_df[f"{fund} (€)"] = qty_prev * price_col
+                # MV change: today's MV - yesterday's MV
+                prev_price = price_col.shift(1)
+                mv_change = (qty_prev * price_col) - (qty_prev * prev_price)
+                mv_df[f"{fund} (€) Δ"] = mv_change
+
+            # Calculate portfolio Market Value
+            total_mv = pd.DataFrame([mv_df[f"{f} (€)"] for f in filter_funds]).sum(axis=0)
+            prev_total_mv = total_mv.shift(1)
+            mv_df["Daily MV Total (€)"] = total_mv
+            mv_df["Daily MV Total Δ (€)"] = total_mv - prev_total_mv
+
+            # Sort descending by date for display
+            mv_display = mv_df.sort_values("date", ascending=False).reset_index(drop=True)
+            
+            # Format for display
+            display_mv = mv_display[["date"]].copy()
+            display_mv["Date"] = display_mv["date"].dt.strftime("%Y-%m-%d")
+            display_mv = display_mv.drop(columns=["date"])
+            
+            for fund in filter_funds:
+                first_date = first_tx_date_by_fund.get(fund)
+                if first_date:
+                    first_date = pd.to_datetime(first_date)
+                    
+                    def fmt_mv_holding(idx, fund_name):
+                        delta_val = mv_display[f"{fund_name} (€) Δ"].iloc[idx]
+                        
+                        if pd.isna(delta_val):
+                            return "-"
+                        
+                        delta_sign = "+" if delta_val > 0 else ""
+                        return f"{delta_sign}€{delta_val:.2f}"
+                    
+                    display_mv[fund] = [
+                        fmt_mv_holding(i, fund)
+                        if pd.to_datetime(mv_display["date"].iloc[i]) >= first_date else "-"
+                        for i in range(len(mv_display))
+                    ]
+            
+            # Add Daily Total MV column
+            def fmt_total_mv(idx):
+                delta_val = mv_display["Daily MV Total Δ (€)"].iloc[idx]
+                if pd.isna(delta_val):
+                    return "-"
+                delta_sign = "+" if delta_val > 0 else ""
+                return f"{delta_sign}€{delta_val:.2f}"
+            
+            display_mv["Daily Total Δ (€)"] = [fmt_total_mv(i) for i in range(len(mv_display))]
+            
+            # Style function for MV table
+            def style_mv_table(row):
+                styles = [""] * len(row)
+                idx = row.name
+                
+                for col_idx, fund in enumerate(filter_funds, start=1):
+                    delta_val = mv_display[f"{fund} (€) Δ"].iloc[idx]
+                    if pd.isna(delta_val) or delta_val == 0:
+                        styles[col_idx] = ""
+                    elif delta_val > 0:
+                        styles[col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f;"
+                    else:
+                        styles[col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e;"
+                
+                # Color Daily Total column
+                daily_mv_col_idx = len(filter_funds) + 1
+                daily_val = mv_display["Daily MV Total Δ (€)"].iloc[idx]
+                if pd.isna(daily_val) or daily_val == 0:
+                    styles[daily_mv_col_idx] = ""
+                elif daily_val > 0:
+                    styles[daily_mv_col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f; font-weight: 600;"
+                else:
+                    styles[daily_mv_col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e; font-weight: 600;"
+                
+                return styles
+            
+            styled_mv = display_mv.style.apply(style_mv_table, axis=1)
+            st.dataframe(styled_mv, width="stretch", hide_index=True)
+            
+            # Chart for Market Value Evolution
+            st.subheader("📊 Daily Holdings Market Value Chart")
+            fig_mv_chart = go.Figure()
+            
+            mv_asc = mv_df.sort_values("date", ascending=True).reset_index(drop=True)
+            
+            for fund in filter_funds:
+                first_date = first_tx_date_by_fund.get(fund)
+                fund_data = mv_asc[mv_asc["date"] >= pd.to_datetime(first_date)] if first_date else mv_asc
+                
+                fig_mv_chart.add_trace(go.Scatter(
+                    x=fund_data["date"],
+                    y=fund_data[f"{fund} (€)"],
+                    mode="lines",
+                    name=fund,
+                    line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
+                    hovertemplate=f"<b>{fund} Holdings Value</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+                    stackgroup="one",
+                    fillcolor=f"rgba({int(FUND_COLORS.get(fund, '#999999')[1:3], 16)}, {int(FUND_COLORS.get(fund, '#999999')[3:5], 16)}, {int(FUND_COLORS.get(fund, '#999999')[5:7], 16)}, 0.3)"
+                ))
+            
+            fig_mv_chart.update_layout(
+                height=500,
+                hovermode="x unified",
+                xaxis_title="Date",
+                yaxis_title="Market Value (€)",
+                template="plotly_white",
+                showlegend=True,
+                legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.01),
+                dragmode="pan"
+            )
+            
+            fig_mv_chart.update_xaxes(
+                rangeslider=dict(visible=True, thickness=0.07),
+                rangeselector=dict(
+                    buttons=[
+                        dict(count=1, label="1M", step="month", stepmode="backward"),
+                        dict(count=3, label="3M", step="month", stepmode="backward"),
+                        dict(count=6, label="6M", step="month", stepmode="backward"),
+                        dict(count=1, label="1Y", step="year", stepmode="backward"),
+                        dict(step="all", label="All"),
+                    ]
+                )
+            )
+            
+            st.plotly_chart(fig_mv_chart, use_container_width=True)
+            
+        else:
+            st.info("No historical data available for evolution calculations.")
+    else:
+        st.info("No data available. Please add transactions and ensure at least one fund is selected.")
 
 def transaction_history():
     st.header("📜 Transaction History")
@@ -1569,12 +1603,19 @@ def transaction_history():
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
-            st.metric("P/L Price approx.", f"€ {pl_price_approx:+,.2f}")
+            # Calculate P/L price as percentage of total gross contribution
+            pl_price_pct = (pl_price_approx / total_gross_theor * 100) if total_gross_theor > 0 else 0
+            st.metric(
+                "P/L Price approx.",
+                f"€ {pl_price_approx:+,.2f}",
+                delta=f"{pl_price_pct:+.2f}%",
+                delta_color="normal" if pl_price_approx >= 0 else "off"
+            )
         with row2_col2:
             pl_qty_display = f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})" if last_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
             st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display)
         with row2_col3:
-            st.metric("# of Contributions", f"{num_contributions}")
+            st.metric("Number of Contributions", f"{num_contributions}")
     else:
         st.info("No transactions yet")
 
@@ -2165,8 +2206,7 @@ def historical_prices():
         header_css += "</style>\n"
         st.markdown(header_css, unsafe_allow_html=True)
         
-        # Compute and format daily performance per fund
-        perf_pct_map = {}
+        # Format daily NAV - just the price without %change for performance
         display_df = historical_data_df.copy()
         # Map of transaction dates per fund for cell highlighting
         tx_dates_by_fund = {}
@@ -2177,36 +2217,26 @@ def historical_prices():
             for f in selected_funds:
                 tx_dates_by_fund[f] = set(tx_tmp[tx_tmp["Fund"] == f]["Date"].dt.strftime("%Y-%m-%d").tolist())
 
+        # Format fund prices - simple format without percentage change
         for col in selected_funds:
-            # Table is sorted descending by date; compare current to the next row (previous day)
-            perf = display_df[col].pct_change(periods=-1) * 100
-            perf_pct_map[col] = perf
-            def _fmt(val, p):
-                if st.session_state.data_masked:
-                    return "***.*€ (***.*%)"
-                if pd.isna(val):
-                    return ""
-                if pd.isna(p):
-                    return f"€{val:.2f}"
-                p_fmt = round(float(p), 2)
-                if p_fmt == 0:
-                    return f"€{val:.2f} (0.00%)"
-                sign = "+" if p_fmt > 0 else ""
-                return f"€{val:.2f} ({sign}{p_fmt:.2f}%)"
-            display_df[col] = [
-                _fmt(v, perf_pct_map[col].iloc[i]) for i, v in enumerate(display_df[col].values)
-            ]
+            display_df[col] = display_df[col].apply(lambda x: f"€{x:.2f}" if pd.notna(x) else "")
 
-        # Style positive as slight green hue, negative as slight red
+        # Style positive as slight green hue, negative as slight red (based on daily change)
         def _colorize(column):
-            perf = perf_pct_map.get(column.name, pd.Series([None] * len(display_df)))
+            col_name = column.name
+            if col_name == "date":
+                return [""] * len(display_df)
+            # Compare each price to previous day (next row since descending)
             styles = []
             for i in range(len(display_df)):
-                p = perf.iloc[i]
-                p_fmt = None if pd.isna(p) else round(float(p), 2)
-                if p_fmt is None or p_fmt == 0:
+                if i == len(display_df) - 1:  # Last row (oldest date) has no previous
                     styles.append("")
-                elif p_fmt > 0:
+                    continue
+                current_val = historical_data_df[col_name].iloc[i]
+                prev_val = historical_data_df[col_name].iloc[i + 1]
+                if pd.isna(current_val) or pd.isna(prev_val) or current_val == prev_val:
+                    styles.append("")
+                elif current_val > prev_val:
                     styles.append("color: #6BCB77; font-weight: 600;")
                 else:
                     styles.append("color: #E26A6A; font-weight: 600;")
@@ -2280,9 +2310,46 @@ def add_transactions_and_funds():
                             "Fees (€)": fees,
                         }])
                         transactions = pd.concat([transactions, new_contrib], ignore_index=True)
+                        # Save locally first for immediate app state
                         transactions.to_csv(TRANSACTIONS_FILE, index=False)
-                        st.success("Transaction added")
-                        st.rerun()
+                        
+                        # Attempt to push to GitHub repository
+                        try:
+                            csv_str = transactions.to_csv(index=False)
+                            if GITHUB_TOKEN and GITHUB_REPO:
+                                ok = github_put_file(
+                                    path=TRANSACTIONS_FILE,
+                                    content_str=csv_str,
+                                    message=f"Add transaction for {fund_choice} on {contrib_date.strftime('%Y-%m-%d')} via Streamlit",
+                                )
+                                if ok:
+                                    st.success("✅ Transaction added and pushed to GitHub. App will refresh shortly.")
+                                    # Rerun after a brief delay to fetch updated data from GitHub
+                                    import time
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.warning("⚠️ Transaction saved locally but GitHub push failed. Retrying...")
+                                    # Retry push
+                                    try:
+                                        ok_retry = github_put_file(
+                                            path=TRANSACTIONS_FILE,
+                                            content_str=csv_str,
+                                            message=f"Add transaction for {fund_choice} on {contrib_date.strftime('%Y-%m-%d')} via Streamlit (retry)",
+                                        )
+                                        if ok_retry:
+                                            st.success("✅ Transaction added and pushed to GitHub (retry successful).")
+                                            import time
+                                            time.sleep(1)
+                                            st.rerun()
+                                    except Exception:
+                                        pass
+                            else:
+                                st.warning("⚠️ Transaction saved locally. To sync to GitHub, configure GITHUB_TOKEN and GITHUB_REPO in Streamlit secrets.")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error pushing transaction to GitHub: {e}")
+                            st.info("Transaction has been saved locally. Please check your network connection and Streamlit secrets.")
         else:
             st.info("Viewer mode (read-only)")
 
