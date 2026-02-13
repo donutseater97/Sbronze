@@ -37,7 +37,7 @@ def load_data():
         funds = pd.DataFrame(columns=["Fund", "Ticker", "ISIN", "Fund Name", "Type", "Colour"])
 
     if os.path.exists(TRANSACTIONS_FILE):
-        transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"], date_format="%Y-%m-%d")
+        transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"], date_format="%Y-%m-%d %H:%M:%S")
     else:
         transactions = pd.DataFrame(columns=["Date", "Fund", "Price (€)", "Quantity", "Fees (€)"])
 
@@ -2303,7 +2303,7 @@ def add_transactions_and_funds():
                         st.error("Quantity and Price must be greater than 0")
                     else:
                         new_contrib = pd.DataFrame([{
-                            "Date": contrib_date.strftime("%Y-%m-%d"),
+                            "Date": contrib_date.strftime("%Y-%m-%d 00:00:00"),
                             "Fund": fund_choice,
                             "Price (€)": price,
                             "Quantity": quantity,
