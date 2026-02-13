@@ -37,7 +37,7 @@ def load_data():
         funds = pd.DataFrame(columns=["Fund", "Ticker", "ISIN", "Fund Name", "Type", "Colour"])
 
     if os.path.exists(TRANSACTIONS_FILE):
-        transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"])
+        transactions = pd.read_csv(TRANSACTIONS_FILE, parse_dates=["Date"], date_format="%Y-%m-%d")
     else:
         transactions = pd.DataFrame(columns=["Date", "Fund", "Price (€)", "Quantity", "Fees (€)"])
 
