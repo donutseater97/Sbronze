@@ -2311,11 +2311,14 @@ def add_transactions_and_funds():
                         }])
                         transactions = pd.concat([transactions, new_contrib], ignore_index=True)
                         # Save locally first for immediate app state
-                        transactions.to_csv(TRANSACTIONS_FILE, index=False)
+                        # Format the Date column as string to preserve the datetime format
+                        trans_to_save = transactions.copy()
+                        trans_to_save["Date"] = trans_to_save["Date"].dt.strftime("%Y-%m-%d %H:%M:%S")
+                        trans_to_save.to_csv(TRANSACTIONS_FILE, index=False)
                         
                         # Attempt to push to GitHub repository
                         try:
-                            csv_str = transactions.to_csv(index=False)
+                            csv_str = trans_to_save.to_csv(index=False)
                             if GITHUB_TOKEN and GITHUB_REPO:
                                 ok = github_put_file(
                                     path=TRANSACTIONS_FILE,
