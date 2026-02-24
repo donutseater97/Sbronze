@@ -446,11 +446,14 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         xaxis_key = "xaxis" if r == 1 else f"xaxis{r}"
         fig.update_layout(**{xaxis_key: dict(range=[x_min, x_max])})
 
-    # Stile titoli subplot (più piccoli, colore tenue)
+    # Stile titoli subplot (più piccoli, colore tenue).
+    # IMPORTANTE: modificare SOLO le annotazioni-titolo dei subplot (xref="paper"),
+    # senza toccare le annotazioni prezzo/% custom (xref="x", "x2", ecc.).
     for ann in fig.layout.annotations:
-        ann.font = dict(size=13, color="rgba(180,180,180,0.9)")
-        ann.x = 0.01
-        ann.xanchor = "left"
+        if ann.xref == "paper" and ann.yref == "paper":
+            ann.font = dict(size=13, color="rgba(180,180,180,0.9)")
+            ann.x = 0.01
+            ann.xanchor = "left"
 
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("historical_combined"))
 
