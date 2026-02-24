@@ -118,9 +118,9 @@ def historical_prices(
     # ----- Filtro date + toggle vista -----
     col1, col2, col3 = st.columns([2, 2, 1.5])
     with col1:
-        start_d = st.date_input("Start", value=default_start, key="hist_start_date")
+        start_d = st.date_input("Start", value=default_start, min_value=min_d, key="hist_start_date")
     with col2:
-        end_d = st.date_input("End", value=max_d, key="hist_end_date")
+        end_d = st.date_input("End", value=max_d, min_value=min_d, key="hist_end_date")
     with col3:
         st.markdown("")
         view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
@@ -227,20 +227,20 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             col=1,
         )
 
-        # Annotazione laterale con ultimo % return
+        # Annotazione laterale con ultimo % return (dentro il grafico, a destra)
         last_pct = pct_return.iloc[-1]
         fig.add_annotation(
             x=fund_df["date"].iloc[-1],
             y=last_pct,
             text=f"{last_pct:+.2f}%",
             showarrow=False,
-            xanchor="left",
-            xshift=10,
-            font=dict(size=12, color=color),
+            xanchor="right",
+            xshift=-6,
+            font=dict(size=11, color=color),
             bordercolor=color,
             borderwidth=1.5,
             borderpad=3,
-            bgcolor="rgba(255,255,255,0)",
+            bgcolor="rgba(30,30,30,0.7)",
             xref="x",
             yref="y",
         )
@@ -341,7 +341,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                 col=1,
             )
 
-        # --- Annotazione prezzo laterale ---
+        # --- Annotazione prezzo (dentro il grafico, a destra) ---
         latest_price = fund_df[fund].iloc[-1]
         # Riferimenti assi per subplot: riga 1 → x/y, riga 2 → x2/y2, ...
         xref = "x" if row == 1 else f"x{row}"
@@ -351,13 +351,13 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             y=latest_price,
             text=f"€{latest_price:,.2f}",
             showarrow=False,
-            xanchor="left",
-            xshift=10,
-            font=dict(size=12, color=color),
+            xanchor="right",
+            xshift=-6,
+            font=dict(size=11, color=color),
             bordercolor=color,
             borderwidth=1.5,
             borderpad=3,
-            bgcolor="rgba(255,255,255,0)",
+            bgcolor="rgba(30,30,30,0.7)",
             xref=xref,
             yref=yref,
         )
@@ -375,12 +375,12 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         dragmode="pan",
         uirevision="hist_combined_stacked",
         newshape=dict(line_color="#888888"),
-        margin=dict(r=90, t=30, b=10, l=50),
+        margin=dict(r=20, t=30, b=10, l=50),
     )
 
-    # Titolo asse Y per il primo pannello
+    # Asse Y primo pannello (senza titolo)
     fig.update_yaxes(
-        title_text="Return %",
+        title_text="",
         row=1,
         col=1,
         fixedrange=False,
@@ -391,10 +391,10 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         zerolinecolor="rgba(150,150,150,0.3)",
     )
 
-    # Asse Y per i singoli fondi
+    # Asse Y per i singoli fondi (senza titolo)
     for i in range(n_funds):
         fig.update_yaxes(
-            title_text="NAV (€)",
+            title_text="",
             row=i + 2,
             col=1,
             fixedrange=False,
@@ -403,17 +403,35 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             automargin=True,
         )
 
+    # --- Linee separatrici orizzontali tra i sotto-grafici ---
+    # Calcola le posizioni Y (in coordinate paper) dei bordi inferiori di ogni subplot
+    total_weight = sum(row_heights)
+    cum = 0
+    for r_idx in range(n_rows - 1):  # non serve dopo l'ultimo
+        cum += row_heights[r_idx]
+        # Posizione Y in paper coordinates (1 = top, 0 = bottom)
+        y_paper = 1.0 - cum / total_weight
+        fig.add_shape(
+            type="line",
+            xref="paper", yref="paper",
+            x0=0, x1=1,
+            y0=y_paper, y1=y_paper,
+            line=dict(color="rgba(150,150,150,0.4)", width=1),
+        )
+
     # Range esplicito dell'asse X per tutti i subplot (previene il bug 1970
     # causato da autorange che interpreta male annotazioni cross-subplot)
     x_min = plot_df["date"].min()
     x_max = plot_df["date"].max()
 
-    # Rangeslider e rangeselector sull'ultimo asse X (in basso)
+    # Rangeslider e rangeselector sull'ultimo asse X (in basso).
+    # Il range del rangeslider è vincolato al filtro date della pagina
+    # (start_d / end_d), esattamente come nella vista grid.
     bottom_xaxis_key = f"xaxis{n_rows}" if n_rows > 1 else "xaxis"
     fig.update_layout(**{
         bottom_xaxis_key: dict(
             range=[x_min, x_max],
-            rangeslider=dict(visible=True, thickness=0.04),
+            rangeslider=dict(visible=True, thickness=0.04, range=[x_min, x_max]),
             rangeselector=dict(buttons=RANGE_SELECTOR_BUTTONS),
             showspikes=True,
             spikemode="across",
