@@ -13,6 +13,7 @@ import os
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import date, datetime
 
 from config import FUND_COLORS, FUNDS_FILE, HISTORICAL_FILE, load_historical_prices
@@ -150,7 +151,7 @@ def historical_prices(
 
     # ===== RENDERING GRAFICO =====
     if st.session_state.hist_view_mode == "combined":
-        _render_combined_view(plot_df, selected_funds, avg_nav_by_fund)
+        _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d)
     else:
         _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d)
 
@@ -165,55 +166,259 @@ def historical_prices(
 # SOTTO-FUNZIONI (private)
 # =============================================================================
 
-def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund):
-    """Grafico combinato con tutti i fondi su un unico asse."""
-    fig = go.Figure()
+def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d):
+    """Vista combinata: pannello % return normalizzato in alto + grafici NAV individuali sotto.
 
+    Layout a subplots con x-axis condiviso (zoom/pan temporale sincronizzato).
+    Ogni grafico ha il proprio y-axis (pan verticale indipendente).
+
+    Il primo pannello (più grande) mostra il rendimento percentuale di tutti i fondi
+    normalizzato a 0% dalla prima data visibile. I pannelli sottostanti mostrano
+    il NAV di ciascun fondo con linea media NAV e marker transazioni.
+    """
+    n_funds = len(selected_funds)
+    n_rows = 1 + n_funds  # riga 1 = % return, righe 2..N+1 = singoli fondi
+
+    # Altezze relative: primo pannello ~1.8x i singoli
+    row_heights = [1.8] + [1.0] * n_funds
+
+    # Titoli dei subplot (primo = % Return, poi nome fondo)
+    subplot_titles = ["% Return (Normalized)"] + selected_funds
+
+    fig = make_subplots(
+        rows=n_rows,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.025,
+        row_heights=row_heights,
+        subplot_titles=subplot_titles,
+    )
+
+    # ------------------------------------------------------------------
+    # RIGA 1 — Rendimento % normalizzato (base = 0% alla data iniziale)
+    # ------------------------------------------------------------------
     for fund in selected_funds:
         fund_df = plot_df[["date", fund]].dropna().sort_values("date")
         if len(fund_df) == 0:
             continue
+
+        start_val = fund_df[fund].iloc[0]
+        if start_val != 0:
+            pct_return = (fund_df[fund] / start_val - 1) * 100
+        else:
+            pct_return = fund_df[fund] * 0
+
         color = FUND_COLORS.get(fund, "#999999")
-        fig.add_trace(go.Scatter(
-            x=fund_df["date"], y=fund_df[fund],
-            mode="lines", name=fund,
-            line=dict(color=color, width=2),
-            hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
-        ))
-        # Linea media NAV
-        if fund in avg_nav_by_fund:
-            fig.add_trace(go.Scatter(
-                x=[fund_df["date"].min(), fund_df["date"].max()],
-                y=[avg_nav_by_fund[fund], avg_nav_by_fund[fund]],
-                mode="lines", name=f"{fund} Avg NAV",
-                line=dict(color=color, dash="dash", width=1.5),
-                hovertemplate=f"<b>{fund} Avg NAV</b><br>€%{{y:,.2f}}<extra></extra>",
-                showlegend=True,
-            ))
 
-    y_min, y_max = calculate_y_range_with_padding(fig.data)
+        fig.add_trace(
+            go.Scatter(
+                x=fund_df["date"],
+                y=pct_return,
+                mode="lines",
+                name=fund,
+                line=dict(color=color, width=2),
+                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>%{{y:+.2f}}%<extra></extra>",
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
+        )
 
-    fig.update_layout(
-        height=450, hovermode="x unified", xaxis_title="", yaxis_title="NAV (€)",
-        template="plotly_white", showlegend=False, dragmode="pan",
-        uirevision="hist_combined", newshape=dict(line_color="#888888"),
-        margin=dict(r=100),
+        # Annotazione laterale con ultimo % return
+        last_pct = pct_return.iloc[-1]
+        fig.add_annotation(
+            x=fund_df["date"].iloc[-1],
+            y=last_pct,
+            text=f"{last_pct:+.2f}%",
+            showarrow=False,
+            xanchor="left",
+            xshift=10,
+            font=dict(size=12, color=color),
+            bordercolor=color,
+            borderwidth=1.5,
+            borderpad=3,
+            bgcolor="rgba(255,255,255,0)",
+            xref=f"x",
+            yref=f"y",
+        )
+
+    # Linea orizzontale 0% di riferimento
+    fig.add_hline(
+        y=0,
+        line=dict(color="rgba(150,150,150,0.4)", width=1, dash="dot"),
+        row=1,
+        col=1,
     )
-    apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS)
 
-    yaxis_cfg = dict(rangemode="normal", fixedrange=False, showspikes=True, spikemode="across", automargin=True)
-    if y_min is not None and y_max is not None:
-        yaxis_cfg["range"] = [y_min, y_max]
-        yaxis_cfg["autorange"] = False
-        for fund in selected_funds:
-            fund_df = plot_df[["date", fund]].dropna().sort_values("date")
-            if len(fund_df) > 0:
-                add_price_annotation(fig, fund_df["date"].iloc[-1], fund_df[fund].iloc[-1],
-                                     f"€{fund_df[fund].iloc[-1]:,.2f}", FUND_COLORS.get(fund, "#999999"))
-    else:
-        yaxis_cfg["autorange"] = True
+    # ------------------------------------------------------------------
+    # RIGHE 2..N+1 — Grafici NAV individuali (prezzo + avg NAV + transazioni)
+    # ------------------------------------------------------------------
+    # Prepara transazioni nel range di date selezionato
+    trans_df = transactions.copy()
+    trans_df["Date"] = pd.to_datetime(trans_df["Date"], errors="coerce")
+    trans_df = trans_df.dropna(subset=["Date"])
+    trans_df = trans_df[
+        (trans_df["Date"] >= pd.to_datetime(start_d))
+        & (trans_df["Date"] <= pd.to_datetime(end_d))
+    ]
 
-    fig.update_yaxes(**yaxis_cfg)
+    for i, fund in enumerate(selected_funds):
+        row = i + 2  # riga 1 = % return → i fondi partono da riga 2
+        fund_df = plot_df[["date", fund]].dropna().sort_values("date")
+        if len(fund_df) == 0:
+            continue
+
+        color = FUND_COLORS.get(fund, "#999999")
+
+        # --- Linea prezzo NAV ---
+        fig.add_trace(
+            go.Scatter(
+                x=fund_df["date"],
+                y=fund_df[fund],
+                mode="lines",
+                name=fund,
+                line=dict(color=color, width=2),
+                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+                showlegend=False,
+            ),
+            row=row,
+            col=1,
+        )
+
+        # --- Linea media NAV (tratteggiata) ---
+        if fund in avg_nav_by_fund:
+            fig.add_trace(
+                go.Scatter(
+                    x=[fund_df["date"].min(), fund_df["date"].max()],
+                    y=[avg_nav_by_fund[fund], avg_nav_by_fund[fund]],
+                    mode="lines",
+                    name=f"{fund} Avg NAV",
+                    line=dict(color=color, dash="dash", width=1.5),
+                    hovertemplate=f"<b>{fund} Avg NAV</b><br>€%{{y:,.2f}}<extra></extra>",
+                    showlegend=False,
+                ),
+                row=row,
+                col=1,
+            )
+
+        # --- Marker transazioni ---
+        fund_trans = trans_df[trans_df["Fund"] == fund]
+        if len(fund_trans) > 0:
+            trans_prices, trans_dates, hover_texts = [], [], []
+            for _, t_row in fund_trans.iterrows():
+                t_date = t_row["Date"]
+                closest_idx = (fund_df["date"] - t_date).abs().idxmin()
+                trans_prices.append(fund_df.loc[closest_idx, fund])
+                trans_dates.append(t_date)
+                hover_texts.append(
+                    f"<b>Transaction</b><br>"
+                    f"Date: {t_date.strftime('%Y-%m-%d')}<br>"
+                    f"Qty: {t_row['Quantity']:.3f}<br>"
+                    f"Price: €{t_row['Price (€)']:.2f}<br>"
+                    f"Fees: €{t_row['Fees (€)']:.2f}<br>"
+                    f"Total: €{(t_row['Quantity'] * t_row['Price (€)'] + t_row['Fees (€)']):.2f}"
+                )
+            fig.add_trace(
+                go.Scatter(
+                    x=trans_dates,
+                    y=trans_prices,
+                    mode="markers",
+                    name=f"{fund} Transactions",
+                    marker=dict(
+                        size=9,
+                        color=color,
+                        symbol="circle",
+                        line=dict(width=2, color="white"),
+                    ),
+                    hovertemplate="%{text}<extra></extra>",
+                    text=hover_texts,
+                    showlegend=False,
+                ),
+                row=row,
+                col=1,
+            )
+
+        # --- Annotazione prezzo laterale ---
+        latest_price = fund_df[fund].iloc[-1]
+        # yref per subplot: "y" per riga 1, "y2" per riga 2, "y3" per riga 3...
+        yref = "y" if row == 1 else f"y{row}"
+        fig.add_annotation(
+            x=fund_df["date"].iloc[-1],
+            y=latest_price,
+            text=f"€{latest_price:,.2f}",
+            showarrow=False,
+            xanchor="left",
+            xshift=10,
+            font=dict(size=12, color=color),
+            bordercolor=color,
+            borderwidth=1.5,
+            borderpad=3,
+            bgcolor="rgba(255,255,255,0)",
+            xref="x",
+            yref=yref,
+        )
+
+    # ------------------------------------------------------------------
+    # LAYOUT
+    # ------------------------------------------------------------------
+    total_height = 350 + 230 * n_funds
+    fig.update_layout(
+        height=total_height,
+        hovermode="x unified",
+        template="plotly_white",
+        showlegend=False,
+        dragmode="pan",
+        uirevision="hist_combined_stacked",
+        newshape=dict(line_color="#888888"),
+        margin=dict(r=100, t=40, b=30),
+    )
+
+    # Titolo asse Y per il primo pannello
+    fig.update_yaxes(
+        title_text="Return %",
+        row=1,
+        col=1,
+        fixedrange=False,
+        showspikes=True,
+        spikemode="across",
+        automargin=True,
+        zeroline=True,
+        zerolinecolor="rgba(150,150,150,0.3)",
+    )
+
+    # Asse Y per i singoli fondi
+    for i in range(n_funds):
+        fig.update_yaxes(
+            title_text="NAV (€)",
+            row=i + 2,
+            col=1,
+            fixedrange=False,
+            showspikes=True,
+            spikemode="across",
+            automargin=True,
+        )
+
+    # Range slider e range selector solo sull'ultimo asse X (quello visibile in basso)
+    # Con shared_xaxes, l'asse X dell'ultima riga controlla tutti
+    bottom_xaxis = f"xaxis{n_rows}" if n_rows > 1 else "xaxis"
+    fig.update_layout(**{
+        bottom_xaxis: dict(
+            rangeslider=dict(visible=True, thickness=0.04),
+            rangeselector=dict(buttons=RANGE_SELECTOR_BUTTONS),
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikethickness=1,
+            spikecolor="#888888",
+        )
+    })
+
+    # Stile titoli subplot (più piccoli, colore tenue)
+    for ann in fig.layout.annotations:
+        ann.font = dict(size=13, color="rgba(180,180,180,0.9)")
+        ann.x = 0.01
+        ann.xanchor = "left"
+
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("historical_combined"))
 
 
