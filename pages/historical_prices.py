@@ -14,7 +14,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from config import FUND_COLORS, FUNDS_FILE, HISTORICAL_FILE, load_historical_prices
 from components.fund_filter import render_fund_filter
@@ -107,22 +107,49 @@ def historical_prices(
 
     selected_funds = render_fund_filter(fund_cols, FUND_COLORS)
 
+    # ----- Limiti date dal dataset -----
+    min_d = hist_df_display["date"].min().date()
+    max_d = hist_df_display["date"].max().date()
+
+    # Gestisci override da bottoni quick-range (prima che il widget venga renderizzato)
+    if "_hist_quick_start" in st.session_state:
+        st.session_state["hist_start_date"] = st.session_state.pop("_hist_quick_start")
+
+    default_start = date(2024, 10, 1)
+    if min_d > default_start:
+        default_start = min_d
+
     # ----- Filtro date + toggle vista -----
     col1, col2, col3 = st.columns([2, 2, 1.5])
     with col1:
-        min_d = hist_df_display["date"].min().date()
-        default_start = date(2024, 10, 1)
-        if min_d > default_start:
-            default_start = min_d
         start_d = st.date_input("Start", value=default_start, key="hist_start_date")
     with col2:
-        max_d = hist_df_display["date"].max().date()
         end_d = st.date_input("End", value=max_d, key="hist_end_date")
     with col3:
         st.markdown("")
         view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
         use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
         st.session_state.hist_view_mode = "combined" if use_combined else "grid"
+
+    # ----- Bottoni quick-range (zoom temporale sopra il grafico) -----
+    # Ogni click aggiorna la data di inizio e fa rerun → la normalizzazione
+    # % del pannello superiore si ricalcola dalla nuova data iniziale.
+    _RANGE_DEFS = [
+        ("1M", 30), ("3M", 90), ("6M", 180),
+        ("YTD", "ytd"), ("1Y", 365), ("3Y", 1095), ("All", "all"),
+    ]
+    btn_cols = st.columns(len(_RANGE_DEFS))
+    for btn_col, (label, delta) in zip(btn_cols, _RANGE_DEFS):
+        with btn_col:
+            if st.button(label, key=f"hist_range_{label}", use_container_width=True):
+                if delta == "all":
+                    new_start = min_d
+                elif delta == "ytd":
+                    new_start = max(date(max_d.year, 1, 1), min_d)
+                else:
+                    new_start = max(max_d - timedelta(days=int(delta)), min_d)
+                st.session_state["_hist_quick_start"] = new_start
+                st.rerun()
 
     plot_df = hist_df_display[
         (hist_df_display["date"] >= pd.to_datetime(start_d))
@@ -179,8 +206,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
     n_funds = len(selected_funds)
     n_rows = 1 + n_funds  # riga 1 = % return, righe 2..N+1 = singoli fondi
 
-    # Altezze relative: primo pannello ~1.8x i singoli
-    row_heights = [1.8] + [1.0] * n_funds
+    # Altezze relative: primo pannello leggermente più grande dei singoli
+    row_heights = [1.3] + [1.0] * n_funds
 
     # Titoli dei subplot (primo = % Return, poi nome fondo)
     subplot_titles = ["% Return (Normalized)"] + selected_funds
@@ -189,7 +216,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         rows=n_rows,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.025,
+        vertical_spacing=0.015,
         row_heights=row_heights,
         subplot_titles=subplot_titles,
     )
@@ -361,7 +388,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
     # ------------------------------------------------------------------
     # LAYOUT
     # ------------------------------------------------------------------
-    total_height = 350 + 230 * n_funds
+    # Altezza compatta: tutti i pannelli devono stare in una sola pagina
+    total_height = 180 + 105 * n_funds
     fig.update_layout(
         height=total_height,
         hovermode="x unified",
@@ -370,7 +398,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         dragmode="pan",
         uirevision="hist_combined_stacked",
         newshape=dict(line_color="#888888"),
-        margin=dict(r=100, t=40, b=30),
+        margin=dict(r=90, t=30, b=10, l=50),
     )
 
     # Titolo asse Y per il primo pannello
@@ -398,13 +426,12 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             automargin=True,
         )
 
-    # Range slider e range selector solo sull'ultimo asse X (quello visibile in basso)
-    # Con shared_xaxes, l'asse X dell'ultima riga controlla tutti
-    bottom_xaxis = f"xaxis{n_rows}" if n_rows > 1 else "xaxis"
+    # Nessun rangeslider/rangeselector Plotly: i bottoni Streamlit sopra
+    # gestiscono lo zoom temporale e aggiornano la normalizzazione %.
+    # Spike lines sull'asse X dell'ultimo subplot (quello con le etichette date)
+    bottom_xaxis_key = f"xaxis{n_rows}" if n_rows > 1 else "xaxis"
     fig.update_layout(**{
-        bottom_xaxis: dict(
-            rangeslider=dict(visible=True, thickness=0.04),
-            rangeselector=dict(buttons=RANGE_SELECTOR_BUTTONS),
+        bottom_xaxis_key: dict(
             showspikes=True,
             spikemode="across",
             spikesnap="cursor",
