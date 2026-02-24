@@ -14,7 +14,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from config import FUND_COLORS, FUNDS_FILE, HISTORICAL_FILE, load_historical_prices
 from components.fund_filter import render_fund_filter
@@ -111,10 +111,6 @@ def historical_prices(
     min_d = hist_df_display["date"].min().date()
     max_d = hist_df_display["date"].max().date()
 
-    # Gestisci override da bottoni quick-range (prima che il widget venga renderizzato)
-    if "_hist_quick_start" in st.session_state:
-        st.session_state["hist_start_date"] = st.session_state.pop("_hist_quick_start")
-
     default_start = date(2024, 10, 1)
     if min_d > default_start:
         default_start = min_d
@@ -130,26 +126,6 @@ def historical_prices(
         view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
         use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
         st.session_state.hist_view_mode = "combined" if use_combined else "grid"
-
-    # ----- Bottoni quick-range (zoom temporale sopra il grafico) -----
-    # Ogni click aggiorna la data di inizio e fa rerun → la normalizzazione
-    # % del pannello superiore si ricalcola dalla nuova data iniziale.
-    _RANGE_DEFS = [
-        ("1M", 30), ("3M", 90), ("6M", 180),
-        ("YTD", "ytd"), ("1Y", 365), ("3Y", 1095), ("All", "all"),
-    ]
-    btn_cols = st.columns(len(_RANGE_DEFS))
-    for btn_col, (label, delta) in zip(btn_cols, _RANGE_DEFS):
-        with btn_col:
-            if st.button(label, key=f"hist_range_{label}", use_container_width=True):
-                if delta == "all":
-                    new_start = min_d
-                elif delta == "ytd":
-                    new_start = max(date(max_d.year, 1, 1), min_d)
-                else:
-                    new_start = max(max_d - timedelta(days=int(delta)), min_d)
-                st.session_state["_hist_quick_start"] = new_start
-                st.rerun()
 
     plot_df = hist_df_display[
         (hist_df_display["date"] >= pd.to_datetime(start_d))
@@ -265,8 +241,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             borderwidth=1.5,
             borderpad=3,
             bgcolor="rgba(255,255,255,0)",
-            xref=f"x",
-            yref=f"y",
+            xref="x",
+            yref="y",
         )
 
     # Linea orizzontale 0% di riferimento
@@ -367,7 +343,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
 
         # --- Annotazione prezzo laterale ---
         latest_price = fund_df[fund].iloc[-1]
-        # yref per subplot: "y" per riga 1, "y2" per riga 2, "y3" per riga 3...
+        # Riferimenti assi per subplot: riga 1 → x/y, riga 2 → x2/y2, ...
+        xref = "x" if row == 1 else f"x{row}"
         yref = "y" if row == 1 else f"y{row}"
         fig.add_annotation(
             x=fund_df["date"].iloc[-1],
@@ -381,7 +358,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             borderwidth=1.5,
             borderpad=3,
             bgcolor="rgba(255,255,255,0)",
-            xref="x",
+            xref=xref,
             yref=yref,
         )
 
@@ -426,12 +403,18 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             automargin=True,
         )
 
-    # Nessun rangeslider/rangeselector Plotly: i bottoni Streamlit sopra
-    # gestiscono lo zoom temporale e aggiornano la normalizzazione %.
-    # Spike lines sull'asse X dell'ultimo subplot (quello con le etichette date)
+    # Range esplicito dell'asse X per tutti i subplot (previene il bug 1970
+    # causato da autorange che interpreta male annotazioni cross-subplot)
+    x_min = plot_df["date"].min()
+    x_max = plot_df["date"].max()
+
+    # Rangeslider e rangeselector sull'ultimo asse X (in basso)
     bottom_xaxis_key = f"xaxis{n_rows}" if n_rows > 1 else "xaxis"
     fig.update_layout(**{
         bottom_xaxis_key: dict(
+            range=[x_min, x_max],
+            rangeslider=dict(visible=True, thickness=0.04),
+            rangeselector=dict(buttons=RANGE_SELECTOR_BUTTONS),
             showspikes=True,
             spikemode="across",
             spikesnap="cursor",
@@ -439,6 +422,11 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             spikecolor="#888888",
         )
     })
+
+    # Range esplicito anche sugli altri assi X (condivisi ma serve per autorange)
+    for r in range(1, n_rows):
+        xaxis_key = "xaxis" if r == 1 else f"xaxis{r}"
+        fig.update_layout(**{xaxis_key: dict(range=[x_min, x_max])})
 
     # Stile titoli subplot (più piccoli, colore tenue)
     for ann in fig.layout.annotations:
