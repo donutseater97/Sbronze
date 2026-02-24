@@ -1,218 +1,180 @@
 # 📊 Sbronze Treasure Hunt
 
-A comprehensive portfolio tracking and analysis application built with Streamlit. Track investments, visualize performance, and gain insights into your financial portfolio.
+Applicazione di portfolio tracking e analisi costruita con **Streamlit**.
+Traccia investimenti, visualizza performance e ottieni insight sul tuo portafoglio finanziario.
 
-## 🎯 Features
+## 🎯 Funzionalità
 
-### Portfolio Summary
-- **Fund Filters**: Filter portfolio by individual funds or view all
-- **Data Masking**: 🔒 Toggle to hide sensitive financial data (shows "***.*€")
-- **Key Metrics**:
-  - Gross Contributions & Net Invested
-  - Market Value with Daily % changes
-  - Total & Net Returns with percentage breakdown
-  - Month-over-Month performance
-  - Portfolio weights by market value
+### 📊 Overview & Charts
+- **Filtro fondi**: seleziona singoli fondi o visualizza tutto il portafoglio
+- **Mascheramento dati**: 🔒 nascondi valori sensibili ("***.*€") durante condivisione schermo
+- **Metriche chiave**: Gross Contributions, Net Invested, Market Value, Total & Net Returns, Month-over-Month, pesi di portafoglio
+- **Revenue P&L Chart**: profitto/perdita cumulativo giornaliero per fondo + totale portafoglio
+- **Investment Evolution**: contributi lordi a scalini + overlay Market Value
+- **Allocation Pies**: doppio grafico (Gross vs Market Value) raggruppabile per Fund, Type o Asset Manager
 
-### Charts & Analytics
+### 📊 Evolution of Portfolio
+- **Daily NAV Table**: variazioni giornaliere assolute e percentuali per fondo
+- **NAV Chart**: andamento NAV del portafoglio
+- **Market Value Table**: evoluzione del controvalore
+- **Holdings Area Chart**: composizione del portafoglio nel tempo
 
-#### Revenue P&L Chart
-- Cumulative daily profit/loss visualization
-- Portfolio total line (toggleable) + individual fund lines
-- Each fund line starts from its first contribution date
-- Interactive controls: range selector, scroll zoom, drawing tools
-- Right-side data labels showing latest P&L values
+### 📈 Historical Data Charts
+- **Combined View**: tutti i fondi su un unico grafico con linee media NAV
+- **Grid View**: grafici individuali (fino a 3 per riga) con marker transazioni
+- **Tabella prezzi storici**: variazioni giornaliere colorate, evidenziazione giorni transazione
 
-#### Investment Evolution
-- Stair-step gross contribution tracking
-- Market value overlay
-- Side-by-side view with Allocation pies
+### 📜 Transaction History
+- Storico completo delle transazioni con filtri per fondo e data
+- Conteggio contributi, NAV media, delta rispetto alla transazione precedente
 
-#### Allocation Pies (Dual View)
-- **Left**: Gross Contributions allocation
-- **Right**: Market Value allocation
-- **Group By Options**:
-  - Fund (color by fund)
-  - Type (Equity/Bond)
-  - Asset Manager (first word of Fund Name, with assigned palette)
-- Unified legend below both pies
-- Aligned heights (520px) for visual balance
+### 📋 Active Funds
+- Lista fondi attivi con colori identificativi
 
-#### Daily Performance Table
-- Date (descending order)
-- Per-fund daily absolute changes with %
-- Daily Portfolio Performance Total
-- Green/red background coloring
-- Shows "+" prefix for positive values
-
-#### Historical Data Charts
-- **Combined View**: All funds on single chart with average NAV lines
-- **Grid View**: Individual fund charts (up to 3 per row)
-- Transaction markers on charts
-- Right-side data labels with latest prices
-- Range selector buttons (1M, 3M, 6M, YTD, 1Y, 3Y, All)
-- Scroll zoom and drawing tools
-
-#### Historical Data Table
-- Most recent dates first
-- Per-fund daily price changes with % (descending order)
-- Transaction day highlighting (light grey)
-- Colored fund headers matching fund colors
-
-### Transaction History
-- Complete transaction record
-- Contribution count per fund
-- Fund and date filtering
-- Average NAV tracking
-
-### Additional Sections
-- Active Funds management
-- Data input interface (password-protected)
-- Support for custom funds and transactions
+### ➕ Add Transactions & Funds (protetto da password)
+- Interfaccia per aggiungere transazioni e fondi
+- Push automatico su GitHub via REST API
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### Prerequisiti
 - Python 3.11+
 - pip
 
-### Installation
+### Installazione
 
-1. Clone the repository:
 ```bash
 git clone https://github.com/donutseater97/Sbronze.git
 cd Sbronze
-```
-
-2. Install dependencies:
-```bash
 pip install -r requirements.txt
 ```
 
-3. Run the application:
+### Avvio
+
 ```bash
 streamlit run main.py
 ```
 
-4. Open your browser to `http://localhost:8501`
+Apri il browser su `http://localhost:8501`
 
-## 📋 Project Structure
+## 📋 Struttura del Progetto
 
 ```
 Sbronze/
-├── main.py                          # Main Streamlit application
-├── get_historical_data.py           # Investgo + JPMorgan historical data fetcher
-├── get_backup_historical_data.py    # YFinance backup fetcher
-├── requirements.txt                 # Python dependencies
-├── funds.csv                        # Fund definitions (ticker, ISIN, type, color)
-├── transaction_history.csv          # Investment transaction record
-├── historical_data.csv              # Cached price history (updated hourly)
-├── backup_historical_data.csv       # YFinance backup prices (updated weekly)
-├── README.md                        # This file
+├── main.py                         # Entry point Streamlit Cloud (navigazione + CSS)
+├── config.py                       # Configurazione globale, caricamento dati, helper GitHub API
+├── requirements.txt                # Dipendenze Python
+├── get_historical_data.py          # Fetcher prezzi storici (Investgo + JPMorgan API)
+├── README.md
+│
+├── data/                           # Dati CSV del portafoglio
+│   ├── funds.csv                   # Definizioni fondi (ticker, ISIN, tipo, colore)
+│   ├── transaction_history.csv     # Registro transazioni
+│   ├── historical_data.csv         # Prezzi storici (aggiornati ogni ora da GitHub Actions)
+│   ├── monthly_historical_data.csv # Dati mensili per matrice di correlazione
+│   └── monthly_returns.csv         # Rendimenti mensili
+│
+├── pages/                          # Pagine dell'applicazione (una per sezione)
+│   ├── overview_and_charts.py      # Riepilogo portafoglio, P&L, allocation pies
+│   ├── evolution_of_portfolio.py   # Daily NAV, Market Value, Holdings
+│   ├── historical_prices.py        # Grafici prezzi, tabella dati storici
+│   ├── transaction_history.py      # Storico transazioni con filtri
+│   ├── active_funds.py             # Lista fondi attivi
+│   └── add_transactions_and_funds.py # Admin: aggiungi transazioni e fondi
+│
+├── components/                     # Componenti UI riutilizzabili
+│   ├── styling.py                  # Conversioni colore, stili condizionali (verde/rosso)
+│   ├── fund_filter.py              # Widget filtro fondi con bottoni colorati
+│   └── chart_helpers.py            # Configurazione Plotly condivisa (assi, range selector)
+│
+├── utils/                          # Funzioni utility pure (nessuna dipendenza Streamlit)
+│   └── formatting.py               # Formattazione numeri, valute, quantità
+│
+├── scripts/                        # Script standalone
+│   └── extract_monthly_data_for_matrix.py  # Estrae dati mensili per matrice correlazione
+│
 └── .github/workflows/
-    ├── update-historical-data.yml   # Hourly price data update (investgo + JPMorgan)
-    ├── update-backup-historical-data.yml  # Weekly backup (YFinance)
-    └── monthly-backup.yml           # Monthly data snapshot
+    └── update-historical-data.yml  # Aggiornamento prezzi ogni ora (Investgo + JPMorgan)
 ```
 
-## 🔧 Configuration
+## 🔧 Configurazione
 
-### Fund Data (`funds.csv`)
-Define your funds with:
-- **Fund**: Short identifier (used in code)
-- **Ticker**: Yahoo Finance ticker
-- **ISIN**: International Securities Identification Number
-- **Fund Name**: Full fund name (first word = Asset Manager)
-- **Type**: Equity or Bond
-- **Colour**: Hex color code for charts
+### Fund Data (`data/funds.csv`)
+| Colonna     | Descrizione                                          |
+|-------------|------------------------------------------------------|
+| `Fund`      | Identificativo breve (usato nel codice e nei filtri) |
+| `Ticker`    | Ticker Yahoo Finance                                 |
+| `ISIN`      | Codice ISIN                                          |
+| `Fund Name` | Nome completo (prima parola = Asset Manager)         |
+| `Type`      | Equity o Bond                                        |
+| `Colour`    | Codice colore esadecimale per i grafici              |
 
-### Transactions (`transaction_history.csv`)
-Record each investment with:
-- **Date**: Transaction date (YYYY-MM-DD)
-- **Fund**: Fund identifier
-- **Price (€)**: Unit price at purchase
-- **Quantity**: Number of units
-- **Fees (€)**: Transaction fees
+### Transactions (`data/transaction_history.csv`)
+| Colonna      | Descrizione               |
+|--------------|---------------------------|
+| `Date`       | Data transazione (YYYY-MM-DD) |
+| `Fund`       | Identificativo fondo      |
+| `Price (€)`  | Prezzo unitario           |
+| `Quantity`   | Numero di quote           |
+| `Fees (€)`   | Commissioni               |
 
 ## 📊 Data Processing
 
 ### Daily Portfolio Performance (DPP)
-Calculated as: `Σ [quantity_f(t-1) × (price_f(t) - price_f(t-1))]`
-- Only includes holdings (quantity > 0)
-- Starts from first transaction date
-- Per-fund calculation from first purchase date
+$DPP(t) = \sum_{f} \left[ qty_f(t-1) \times \left( price_f(t) - price_f(t-1) \right) \right]$
+
+- Solo posizioni con quantità > 0
+- Parte dalla data della prima transazione
+- Calcolo per fondo dalla data del primo acquisto
 
 ### Returns
-- **Gross Return**: Market Value - Gross Contributions
-- **Net Return**: Market Value - (Gross Contributions + Fees)
-- **Total Invested**: Sum of (Quantity × Price + Fees) across all transactions
-
-### Allocation
-- **Gross Contributions**: Sum of all investments (actual cash paid)
-- **Market Value**: Current portfolio value at latest prices
+- **Gross Return** = Market Value − Gross Contributions
+- **Net Return** = Market Value − (Gross Contributions + Fees)
+- **Total Invested** = $\sum (Quantity \times Price + Fees)$
 
 ## 🔐 Security & Privacy
 
-- **Password-Protected Admin**: Default password "123" (change in code)
-- **Data Masking Toggle**: Hide all financial values during screen sharing
-- **Session State**: All data is local to the user's Streamlit session
-- **GitHub Actions**: Secured with ACTIONS_PUSH_TOKEN for auto-updates
+- **Admin protetto da password** (default "123" — modificabile in `config.py`)
+- **Toggle mascheramento dati** per condivisione schermo
+- **Session State** locale per ogni sessione Streamlit
+- **GitHub Actions** protetto con `ACTIONS_PUSH_TOKEN`
 
-## 🔄 Data Updates
+## 🔄 Aggiornamento Dati
 
-- **Historical Prices**: Updated **every hour** from Investgo (primary) + JPMorgan API
-- **Backup Prices**: Updated **weekly** from YFinance
-- **Manual Updates**: Can run `get_historical_data.py` locally anytime
-
-## 📈 Performance Optimizations
-
-- **Vectorized Calculations**: Pandas operations instead of loops
-- **Cached DPP Computation**: Recalculates only on fund filter changes
-- **Efficient Merging**: `merge_asof` for time-series lookups
-- **Minimal Recomputation**: DPP removed from historical table (moved to dedicated section)
-
-**Result**: ~3x faster historical data table rendering
+- **Prezzi storici**: aggiornati **ogni ora** da Investgo (primario) + JPMorgan API
+- **Aggiornamento manuale**: `python get_historical_data.py`
 
 ## 🛠️ Development
 
-### Adding New Funds
-1. Add row to `funds.csv` with fund details
-2. Ensure ticker works with Investgo/YFinance
-3. Workflow auto-fetches price history
+### Aggiungere un nuovo fondo
+1. Aggiungi riga in `data/funds.csv`
+2. Verifica che il ticker funzioni con Investgo
+3. Il workflow GitHub Actions scarica automaticamente i prezzi
 
-### Customizing Charts
-- Modify `FUND_COLORS` dictionary for fund colors
-- Edit chart layouts in `overview_and_charts()` and `historical_prices()`
-- Adjust color palettes in allocation pie sections
+### Personalizzare i grafici
+- Modifica `FUND_COLORS` in `config.py` per i colori
+- Modifica layout in `pages/overview_and_charts.py` e `pages/historical_prices.py`
+- Configurazione assi/range in `components/chart_helpers.py`
 
-## 📝 Notes
+### Script utility
+```bash
+# Estrai dati mensili per matrice di correlazione
+python3 scripts/extract_monthly_data_for_matrix.py data/historical_data.csv
+```
 
-- **Currency**: All values in Euros (€)
-- **Timezone**: Historical data timestamps in Europe/Rome timezone
-- **Data Quality**: Missing prices filled with forward-fill method
-- **Rounding**: Gross Contributions rounded to nearest €10 (configurable)
+## 📝 Note
 
-## 🤝 Contributing
-
-Pull requests welcome! Please ensure:
-- Code follows existing style
-- No sensitive credentials in commits
-- Performance improvements documented
+- **Valuta**: tutti i valori in Euro (€)
+- **Timezone**: dati storici in Europe/Rome
+- **Dati mancanti**: forward-fill dei prezzi
+- **Arrotondamento**: Gross Contributions arrotondati alla decina più vicina
 
 ## 📄 License
 
-Private project - use as reference for your own portfolio tracking
-
-## 📞 Support
-
-For issues or questions:
-1. Check the console output for error messages
-2. Verify `funds.csv` and `transaction_history.csv` formats
-3. Ensure internet connection for real-time price updates
-4. Check workflow logs in GitHub Actions for auto-update status
+Progetto privato — usare come riferimento per il proprio portfolio tracker.
 
 ---
 
-**Last Updated**: January 2026
-**App Version**: 1.0
+**Ultimo aggiornamento**: Gennaio 2026
+**Versione**: 2.0 (ristrutturazione modulare)
 **Status**: Production Ready

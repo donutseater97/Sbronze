@@ -3,7 +3,7 @@ name: Update Historical Data (Investgo + JPMorgan)
 on:
   push:
     paths:
-      - 'funds.csv'
+      - 'data/funds.csv'
       - 'get_historical_data.py'
       - 'requirements.txt'
       - '.github/workflows/update-historical-data.yml'
@@ -49,7 +49,7 @@ jobs:
       - name: Commit updated historical_data.csv
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'Auto-update historical_data.csv'
-          file_pattern: 'historical_data.csv'
+          commit_message: 'Auto-update data/historical_data.csv'
+          file_pattern: 'data/historical_data.csv'
         env:
           GITHUB_TOKEN: ${{ secrets.ACTIONS_PUSH_TOKEN || secrets.GITHUB_TOKEN }}

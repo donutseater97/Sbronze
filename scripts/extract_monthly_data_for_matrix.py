@@ -2,12 +2,16 @@
 """
 extract_monthly_data_for_matrix.py
 
+Estrae dati mensili (prezzi e rendimenti) dal file historical_data.csv
+per il calcolo della matrice di correlazione.
+
 Usage:
   python3 scripts/extract_monthly_data_for_matrix.py INPUT_CSV [MONTHLY_OUTPUT] [RETURNS_OUTPUT]
 
 Defaults:
-  MONTHLY_OUTPUT -> "monthly_historical_data.csv"
-  RETURNS_OUTPUT -> "monthly_returns.csv"
+  INPUT_CSV      -> data/historical_data.csv
+  MONTHLY_OUTPUT -> data/monthly_historical_data.csv
+  RETURNS_OUTPUT -> data/monthly_returns.csv
 
 Use '-' or 'none' for either OUTPUT to skip writing that file.
 
@@ -22,7 +26,11 @@ from pathlib import Path
 import pandas as pd
 
 
-def extract_monthly_data_for_matrix(input_csv: str, monthly_output: str = "monthly_historical_data.csv", returns_output: str = "monthly_returns.csv"):
+def extract_monthly_data_for_matrix(
+    input_csv: str,
+    monthly_output: str = "data/monthly_historical_data.csv",
+    returns_output: str = "data/monthly_returns.csv",
+):
     df = pd.read_csv(input_csv, parse_dates=["Date"])  # parse Date
 
     # Ensure sorted ascending by date
@@ -110,8 +118,8 @@ if __name__ == "__main__":
         print("Usage: python3 scripts/extract_monthly_data_for_matrix.py INPUT_CSV [MONTHLY_OUTPUT] [RETURNS_OUTPUT] (use '-' to skip an output)")
         sys.exit(1)
     input_csv = sys.argv[1]
-    monthly_output = sys.argv[2] if len(sys.argv) > 2 else "monthly_historical_data.csv"
-    returns_output = sys.argv[3] if len(sys.argv) > 3 else "monthly_returns.csv"
+    monthly_output = sys.argv[2] if len(sys.argv) > 2 else "data/monthly_historical_data.csv"
+    returns_output = sys.argv[3] if len(sys.argv) > 3 else "data/monthly_returns.csv"
     input_path = Path(input_csv)
     if not input_path.exists():
         print(f"Input file {input_csv} not found")

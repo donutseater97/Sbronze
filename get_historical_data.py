@@ -8,8 +8,8 @@ import warnings
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
-# Load funds configuration
-funds = pd.read_csv("funds.csv")
+# Load funds configuration from data/ directory
+funds = pd.read_csv("data/funds.csv")
 print(f"DEBUG: Funds loaded: {funds['Fund'].tolist()}")
 print(f"DEBUG: Number of funds: {len(funds)}")
 
@@ -138,7 +138,7 @@ if dfs:
     available_cols = ["Date"] + [col for col in funds["Fund"].tolist() if col in merged_table.columns]
     merged_table = merged_table[available_cols]
     
-    merged_table.to_csv("historical_data.csv", index=False, na_rep='')
-    print(f"\n✓ Saved historical_data.csv with {len(merged_table)} rows and {len(merged_table.columns)} columns")
+    merged_table.to_csv("data/historical_data.csv", index=False, na_rep='')
+    print(f"\n✓ Saved data/historical_data.csv with {len(merged_table)} rows and {len(merged_table.columns)} columns")
 else:
     print("✗ No data fetched")
