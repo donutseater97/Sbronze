@@ -227,15 +227,15 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             col=1,
         )
 
-        # Annotazione laterale con ultimo % return (dentro il grafico, a destra)
+        # Annotazione % return (dentro il grafico, a destra dell'ultimo punto)
         last_pct = pct_return.iloc[-1]
         fig.add_annotation(
             x=fund_df["date"].iloc[-1],
             y=last_pct,
             text=f"{last_pct:+.2f}%",
             showarrow=False,
-            xanchor="right",
-            xshift=-6,
+            xanchor="left",
+            xshift=6,
             font=dict(size=11, color=color),
             bordercolor=color,
             borderwidth=1.5,
@@ -341,7 +341,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                 col=1,
             )
 
-        # --- Annotazione prezzo (dentro il grafico, a destra) ---
+        # --- Annotazione prezzo (dentro il grafico, a destra dell'ultimo punto) ---
         latest_price = fund_df[fund].iloc[-1]
         # Riferimenti assi per subplot: riga 1 → x/y, riga 2 → x2/y2, ...
         xref = "x" if row == 1 else f"x{row}"
@@ -351,8 +351,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             y=latest_price,
             text=f"€{latest_price:,.2f}",
             showarrow=False,
-            xanchor="right",
-            xshift=-6,
+            xanchor="left",
+            xshift=6,
             font=dict(size=11, color=color),
             bordercolor=color,
             borderwidth=1.5,
@@ -375,7 +375,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         dragmode="pan",
         uirevision="hist_combined_stacked",
         newshape=dict(line_color="#888888"),
-        margin=dict(r=20, t=30, b=10, l=50),
+        margin=dict(r=80, t=30, b=10, l=50),
     )
 
     # Asse Y primo pannello (senza titolo)
