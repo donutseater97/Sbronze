@@ -5,11 +5,15 @@ import numpy as np
 from datetime import datetime
 from io import BytesIO
 import warnings
+import os
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
-# Load funds configuration from data/ directory
-funds = pd.read_csv("data/funds.csv")
+# Directory root del progetto (dove si trova questo script)
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Load funds configuration from data/ directory (percorso assoluto)
+funds = pd.read_csv(os.path.join(_ROOT_DIR, "data", "funds.csv"))
 print(f"DEBUG: Funds loaded: {funds['Fund'].tolist()}")
 print(f"DEBUG: Number of funds: {len(funds)}")
 
@@ -138,7 +142,7 @@ if dfs:
     available_cols = ["Date"] + [col for col in funds["Fund"].tolist() if col in merged_table.columns]
     merged_table = merged_table[available_cols]
     
-    merged_table.to_csv("data/historical_data.csv", index=False, na_rep='')
+    merged_table.to_csv(os.path.join(_ROOT_DIR, "data", "historical_data.csv"), index=False, na_rep='')
     print(f"\n✓ Saved data/historical_data.csv with {len(merged_table)} rows and {len(merged_table.columns)} columns")
 else:
     print("✗ No data fetched")

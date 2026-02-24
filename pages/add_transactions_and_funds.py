@@ -15,7 +15,9 @@ from datetime import date
 from config import (
     FUND_COLORS,
     FUNDS_FILE,
+    FUNDS_REPO_PATH,
     TRANSACTIONS_FILE,
+    TRANSACTIONS_REPO_PATH,
     OWNER_PASSWORD,
     GITHUB_TOKEN,
     GITHUB_REPO,
@@ -86,9 +88,9 @@ def add_transactions_and_funds(
                     trans_to_save["Date"] = trans_to_save["Date"].dt.strftime("%Y-%m-%d %H:%M:%S")
                     trans_to_save.to_csv(TRANSACTIONS_FILE, index=False)
 
-                    # Push su GitHub
+                    # Push su GitHub (usa percorso repo-relativo per l'API)
                     transactions = _push_to_github(
-                        trans_to_save, TRANSACTIONS_FILE,
+                        trans_to_save, TRANSACTIONS_REPO_PATH,
                         f"Add transaction for {fund_choice} on {contrib_date.strftime('%Y-%m-%d')} via Streamlit",
                         transactions,
                     )
@@ -133,7 +135,7 @@ def add_transactions_and_funds(
                     try:
                         csv_str = funds.to_csv(index=False)
                         if GITHUB_TOKEN and GITHUB_REPO:
-                            ok = github_put_file(FUNDS_FILE, csv_str, f"Add/Update fund '{fund_cat}' via Streamlit")
+                            ok = github_put_file(FUNDS_REPO_PATH, csv_str, f"Add/Update fund '{fund_cat}' via Streamlit")
                             if ok:
                                 st.success("Fund added and pushed to GitHub. GitHub Actions will refresh prices shortly.")
                             else:

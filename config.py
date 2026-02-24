@@ -19,10 +19,19 @@ import streamlit as st
 # Titolo dell'applicazione (mostrato nel browser e nell'header)
 APP_TITLE = "Sbronze Treasure Hunt"
 
-# Percorsi dei file CSV dati (relativi alla root del repo)
-FUNDS_FILE        = "data/funds.csv"
-TRANSACTIONS_FILE = "data/transaction_history.csv"
-HISTORICAL_FILE   = "data/historical_data.csv"
+# Directory root del progetto (dove si trova config.py / main.py)
+# Usata per costruire percorsi assoluti che funzionano indipendentemente
+# dalla working directory (es. Streamlit Cloud, GitHub Actions, script locali)
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Percorsi assoluti dei file CSV dati
+FUNDS_FILE        = os.path.join(_ROOT_DIR, "data", "funds.csv")
+TRANSACTIONS_FILE = os.path.join(_ROOT_DIR, "data", "transaction_history.csv")
+HISTORICAL_FILE   = os.path.join(_ROOT_DIR, "data", "historical_data.csv")
+
+# Percorsi relativi al repo (usati dalle GitHub API per i commit)
+FUNDS_REPO_PATH        = "data/funds.csv"
+TRANSACTIONS_REPO_PATH = "data/transaction_history.csv"
 
 # Password per l'area admin (add transactions / add funds)
 OWNER_PASSWORD = "123"
