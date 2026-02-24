@@ -91,30 +91,38 @@ if "theme_dark" not in st.session_state:
 # =============================================================================
 pg = st.navigation({
     "Sbronze Menu": [
-        # Ogni st.Page wrappa la funzione pagina passando i parametri globali
+        # Ogni st.Page wrappa la funzione pagina passando i parametri globali.
+        # url_path esplicito perché tutte usano lambda (altrimenti Streamlit
+        # deduce "<lambda>" per tutte e lancia un errore di duplicati).
         st.Page(
             lambda: overview_and_charts(funds, transactions, hist_data_global, last_date_str),
             title="📊 Overview & Charts",
+            url_path="overview",
         ),
         st.Page(
             lambda: evolution_of_portfolio(funds, transactions, hist_data_global),
             title="📊 Evolution of Portfolio",
+            url_path="evolution",
         ),
         st.Page(
             lambda: historical_prices(funds, transactions, hist_data_global, yahoo_tickers),
             title="📈 Historical Data Charts",
+            url_path="historical",
         ),
         st.Page(
             lambda: transaction_history(funds, transactions, hist_data_global, last_date_str),
             title="📜 Transaction History",
+            url_path="transactions",
         ),
         st.Page(
             lambda: active_funds(funds),
             title="📋 Active Funds",
+            url_path="funds",
         ),
         st.Page(
             lambda: add_transactions_and_funds(funds, transactions),
             title="➕ Add Transactions & Funds",
+            url_path="admin",
         ),
     ]
 })
