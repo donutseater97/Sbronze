@@ -178,6 +178,17 @@ st.markdown("""
         background-color: transparent !important;
         border-color: rgba(100, 100, 100, 0.5) !important;
     }
+
+    /* Equal-height metric cards in each row */
+    [data-testid="stHorizontalBlock"] {
+        align-items: stretch !important;
+    }
+    [data-testid="stHorizontalBlock"] [data-testid="stMetricContainer"] {
+        height: 100% !important;
+    }
+    [data-testid="stHorizontalBlock"] [data-testid="stMetric"] {
+        height: 100% !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 

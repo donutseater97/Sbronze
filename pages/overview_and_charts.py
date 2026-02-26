@@ -295,7 +295,6 @@ def overview_and_charts(
     spark_net_return = []
     spark_daily_pnl = []
     spark_mv = []
-    spark_gross = []
 
     if len(hist_data) > 0 and "date" in hist_data.columns:
         hist_asc = hist_data.sort_values("date", ascending=True)
@@ -347,6 +346,18 @@ def overview_and_charts(
         spark_net_return = spark_net_return[1:]
         spark_mv = spark_mv[1:]
 
+    # Sparkline contributi e fees: step-like su 30 giorni (come Investment Evolution)
+    spark_gross = []
+    spark_fees = []
+    if len(hist_data) > 0 and "date" in hist_data.columns:
+        hist_asc_gc = hist_data.sort_values("date", ascending=True)
+        spark_dates = hist_asc_gc.tail(SPARK_DAYS).reset_index(drop=True)["date"]
+        tx_gc = df.sort_values("Date", ascending=True)
+        for d in spark_dates:
+            txs_up_to = tx_gc[tx_gc["Date"] <= d]
+            spark_gross.append(txs_up_to["Gross Contribution (theor)"].sum() if len(txs_up_to) > 0 else 0.0)
+            spark_fees.append(txs_up_to["Fees (€)"].sum() if len(txs_up_to) > 0 else 0.0)
+
     # Placeholder per sparkline vuote (stessa altezza)
     _empty_spark = [0] * max(len(spark_mv), 1)
 
@@ -384,13 +395,13 @@ def overview_and_charts(
     row2c1, row2c2, row2c3 = st.columns(3)
     with row2c1:
         st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}", border=True,
-                  chart_data=_empty_spark, chart_type="line")
+                  chart_data=spark_gross if spark_gross else _empty_spark, chart_type="line")
     with row2c2:
         st.metric("Total Market Value", f"€ {total_market_value:,.2f}", border=True,
                   chart_data=spark_mv if spark_mv else _empty_spark, chart_type="line")
     with row2c3:
-        st.metric("Total Fees", f"€ {total_fees:,.2f}", delta=f"↓ {total_fees_pct:.2f}%", delta_color="off", border=True,
-                  chart_data=_empty_spark, chart_type="line")
+        st.metric("Total Fees", f"€ {total_fees:,.2f}", border=True,
+                  chart_data=spark_fees if spark_fees else _empty_spark, chart_type="line")
 
     # ===== GRAFICI =====
     st.divider()

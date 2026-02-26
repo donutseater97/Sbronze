@@ -224,26 +224,14 @@ def transaction_history(
 
     num_contributions = len(trans_df)
 
-    # ----- Sparkline data: cumulative build-up over transactions -----
-    trans_asc = trans_df.sort_values("Date", ascending=True)
-    spark_gross = trans_asc["Gross Contribution (theor)"].cumsum().tolist()
-    spark_net_inv = (trans_asc["Quantity"] * trans_asc["Price (€)"]).cumsum().tolist()
-    spark_fees = trans_asc["Fees (€)"].cumsum().tolist()
-    spark_pl_price = trans_asc["Δ Net Inv vs Exp"].cumsum().tolist()
-    spark_count = list(range(1, num_contributions + 1))
-    _empty_spark = [0] * max(num_contributions, 1)
-
     # Display totals
     r1c1, r1c2, r1c3 = st.columns(3)
     with r1c1:
-        st.metric("Total Gross Contribution", f"€ {total_gross_theor:,.2f}", border=True,
-                  chart_data=spark_gross if spark_gross else _empty_spark, chart_type="line")
+        st.metric("Total Gross Contribution", f"€ {total_gross_theor:,.2f}")
     with r1c2:
-        st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}", border=True,
-                  chart_data=spark_net_inv if spark_net_inv else _empty_spark, chart_type="line")
+        st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
     with r1c3:
-        st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"↓{fees_pct:.2f}%", delta_color="off", border=True,
-                  chart_data=spark_fees if spark_fees else _empty_spark, chart_type="line")
+        st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"↓{fees_pct:.2f}%", delta_color="off")
 
     r2c1, r2c2, r2c3 = st.columns(3)
     with r2c1:
@@ -252,17 +240,12 @@ def transaction_history(
             "P/L Price approx.", f"€ {pl_price_approx:+,.2f}",
             delta=f"{pl_price_pct:+.2f}%",
             delta_color="normal" if pl_price_approx >= 0 else "off",
-            border=True,
-            chart_data=spark_pl_price if spark_pl_price else _empty_spark,
-            chart_type="line",
         )
     with r2c2:
         pl_qty_display = (
             f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})"
             if last_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
         )
-        st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display, border=True,
-                  chart_data=_empty_spark, chart_type="line")
+        st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display)
     with r2c3:
-        st.metric("Number of Contributions", f"{num_contributions}", border=True,
-                  chart_data=spark_count if spark_count else _empty_spark, chart_type="line")
+        st.metric("Number of Contributions", f"{num_contributions}")
