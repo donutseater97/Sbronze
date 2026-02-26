@@ -166,11 +166,11 @@ st.markdown("""
     }
 
     /* Active/selected pills → white background */
-    [data-testid="stPills"] [aria-selected="true"],
-    [data-testid="stPills"] button[aria-checked="true"],
-    [data-testid="stPills"] [data-baseweb="tab"][aria-selected="true"] {
-        background-color: white !important;
+    button[kind="pillsActive"],
+    [data-testid="stBaseButton-pillsActive"] {
+        background-color: rgba(255, 255, 255, 0.85) !important;
         color: black !important;
+        border-color: rgba(255, 255, 255, 0.9) !important;
     }
 </style>
 """, unsafe_allow_html=True)
