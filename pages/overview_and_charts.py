@@ -291,9 +291,9 @@ def overview_and_charts(
 
     row1c1, row1c2, row1c3 = st.columns(3)
     with row1c1:
-        st.metric("Total Return", f"€ {total_return:,.2f}", delta=f"{total_return_pct:+.2f}%", delta_color="normal")
+        st.metric("Total Return", f"€ {total_return:,.2f}", delta=f"{total_return_pct:+.2f}%", delta_color="normal", border=True)
     with row1c2:
-        st.metric("Total Net Return", f"€ {total_net_return:,.2f}", delta=f"{total_net_return_pct:+.2f}%", delta_color="normal")
+        st.metric("Total Net Return", f"€ {total_net_return:,.2f}", delta=f"{total_net_return_pct:+.2f}%", delta_color="normal", border=True)
     with row1c3:
         # Daily P/L — calcolo diretto da dati storici e quantità
         daily_pnl_eur = 0.0
@@ -315,15 +315,15 @@ def overview_and_charts(
                 daily_pnl_prev_mv += fund_qty * float(s.iloc[1])
         daily_pnl_pct = (daily_pnl_eur / daily_pnl_prev_mv * 100) if daily_pnl_prev_mv > 0 else 0.0
         pct_sign = "+" if daily_pnl_pct > 0 else ""
-        st.metric("Daily P/L", f"€ {daily_pnl_eur:+,.2f}", delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal")
+        st.metric("Daily P/L", f"€ {daily_pnl_eur:+,.2f}", delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal", border=True)
 
     row2c1, row2c2, row2c3 = st.columns(3)
     with row2c1:
-        st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}")
+        st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}", border=True)
     with row2c2:
-        st.metric("Total Market Value", f"€ {total_market_value:,.2f}")
+        st.metric("Total Market Value", f"€ {total_market_value:,.2f}", border=True)
     with row2c3:
-        st.metric("Total Fees", f"€ {total_fees:,.2f}", delta=f"↓ {total_fees_pct:.2f}%", delta_color="off")
+        st.metric("Total Fees", f"€ {total_fees:,.2f}", delta=f"↓ {total_fees_pct:.2f}%", delta_color="off", border=True)
 
     # ===== GRAFICI =====
     st.divider()

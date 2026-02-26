@@ -164,6 +164,14 @@ st.markdown("""
         font-size: 1.05rem !important;
         font-weight: 700 !important;
     }
+
+    /* Active/selected pills → white background */
+    [data-testid="stPills"] [aria-selected="true"],
+    [data-testid="stPills"] button[aria-checked="true"],
+    [data-testid="stPills"] [data-baseweb="tab"][aria-selected="true"] {
+        background-color: white !important;
+        color: black !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 

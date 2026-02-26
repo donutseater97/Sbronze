@@ -227,11 +227,11 @@ def transaction_history(
     # Display totals
     r1c1, r1c2, r1c3 = st.columns(3)
     with r1c1:
-        st.metric("Total Gross Contribution", f"€ {total_gross_theor:,.2f}")
+        st.metric("Total Gross Contribution", f"€ {total_gross_theor:,.2f}", border=True)
     with r1c2:
-        st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
+        st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}", border=True)
     with r1c3:
-        st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"↓{fees_pct:.2f}%", delta_color="off")
+        st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"↓{fees_pct:.2f}%", delta_color="off", border=True)
 
     r2c1, r2c2, r2c3 = st.columns(3)
     with r2c1:
@@ -240,12 +240,13 @@ def transaction_history(
             "P/L Price approx.", f"€ {pl_price_approx:+,.2f}",
             delta=f"{pl_price_pct:+.2f}%",
             delta_color="normal" if pl_price_approx >= 0 else "off",
+            border=True,
         )
     with r2c2:
         pl_qty_display = (
             f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})"
             if last_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
         )
-        st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display)
+        st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display, border=True)
     with r2c3:
-        st.metric("Number of Contributions", f"{num_contributions}")
+        st.metric("Number of Contributions", f"{num_contributions}", border=True)

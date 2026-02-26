@@ -111,15 +111,15 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
 
     # Selettore frequenza
     freq_options = {
-        "Daily": "D", "Weekly": "W", "Monthly": "ME",
-        "Quarterly": "QE", "Semi-Annual": "2QE", "Annual": "YE",
+        "1D": "D", "1W": "W", "1M": "ME",
+        "3M": "QE", "6M": "2QE", "1Y": "YE",
     }
     freq_label = st.segmented_control(
         "Frequency:", list(freq_options.keys()),
-        default="Daily", key="revenue_pnl_freq"
+        default="1D", key="revenue_pnl_freq"
     )
     if freq_label is None:
-        freq_label = "Daily"
+        freq_label = "1D"
     freq = freq_options[freq_label]
 
     if len(hist_asc) == 0:
