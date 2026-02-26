@@ -400,7 +400,7 @@ def overview_and_charts(
         st.metric("Total Market Value", f"€ {total_market_value:,.2f}", border=True,
                   chart_data=spark_mv if spark_mv else _empty_spark, chart_type="line")
     with row2c3:
-        st.metric("Total Fees", f"€ {total_fees:,.2f}", delta=f"↓ {total_fees_pct:.2f}%", delta_color="off", border=True,
+        st.metric("Total Fees", f"€ {total_fees:,.2f}", border=True,
                   chart_data=spark_fees if spark_fees else _empty_spark, chart_type="line")
 
     # ===== GRAFICI =====
