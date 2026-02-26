@@ -123,9 +123,12 @@ def historical_prices(
         end_d = st.date_input("End", value=max_d, min_value=min_d, key="hist_end_date")
     with col3:
         st.markdown("")
-        view_label = "Combined View" if st.session_state.hist_view_mode == "combined" else "Grid View"
-        use_combined = st.toggle(view_label, value=(st.session_state.hist_view_mode == "combined"), key="hist_view_toggle")
-        st.session_state.hist_view_mode = "combined" if use_combined else "grid"
+        view_mode = st.segmented_control(
+            "View:", ["Combined", "Grid"],
+            default="Combined" if st.session_state.hist_view_mode == "combined" else "Grid",
+            key="hist_view_segmented",
+        )
+        st.session_state.hist_view_mode = "combined" if view_mode == "Combined" or view_mode is None else "grid"
 
     plot_df = hist_df_display[
         (hist_df_display["date"] >= pd.to_datetime(start_d))

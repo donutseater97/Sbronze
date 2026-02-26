@@ -405,7 +405,9 @@ def _render_evolution_and_allocation(df, funds, hist_data):
 def _render_allocation_pies(df, funds, hist_data):
     """Renderizza i pie chart di allocazione (Gross Contributions + Market Value)."""
     st.subheader("💰 Allocation")
-    alloc_by = st.selectbox("Group by:", ["Fund", "Type", "Asset Manager"], key="alloc_selectbox")
+    alloc_by = st.segmented_control("Group by:", ["Fund", "Type", "Asset Manager"], default="Fund", key="alloc_segmented")
+    if alloc_by is None:
+        alloc_by = "Fund"
 
     df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
 
@@ -510,7 +512,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
     """Renderizza il grafico Investment Evolution (contributi step + market value)."""
     st.subheader("📈 Investment Evolution")
     if has_alloc_filter:
-        # Spacer per allineare con il selectbox "Group by" nella colonna allocation
+        # Spacer per allineare con il segmented control "Group by" nella colonna allocation
         st.markdown("")
     fig = go.Figure()
 

@@ -76,14 +76,17 @@ def daily_dashboard(
     # =====================================================================
     st.subheader("🏦 Portfolio Daily Performance")
 
-    # Calcola Daily P&L totale
+    # Calcola Daily P&L totale e MV precedente
     total_daily_pnl = 0.0
+    total_mv_yesterday = 0.0
     for fund in filter_funds:
         if fund not in hist_sorted.columns:
             continue
         price_today = pd.to_numeric(pd.Series([latest_row[fund]]), errors="coerce").iloc[0]
         price_yesterday = pd.to_numeric(pd.Series([prev_row[fund]]), errors="coerce").iloc[0]
         qty = fund_qty.get(fund, 0)
+        if pd.notna(price_yesterday):
+            total_mv_yesterday += qty * price_yesterday
         if pd.notna(price_today) and pd.notna(price_yesterday):
             total_daily_pnl += qty * (price_today - price_yesterday)
 
@@ -99,9 +102,12 @@ def daily_dashboard(
                     day_pnl += fund_qty.get(fund, 0) * (p_today - p_prev)
         portfolio_pnl_spark.append(day_pnl)
 
+    portfolio_pnl_pct = (total_daily_pnl / total_mv_yesterday * 100) if total_mv_yesterday > 0 else 0.0
     st.metric(
         "Daily P&L",
         f"€{total_daily_pnl:+,.2f}",
+        delta=f"{portfolio_pnl_pct:+.2f}%",
+        delta_color="normal",
         border=True,
         chart_data=portfolio_pnl_spark,
         chart_type="bar",
@@ -166,21 +172,24 @@ def daily_dashboard(
                 unsafe_allow_html=True,
             )
 
-            # Card 1: NAV (con delta e line sparkline)
+            # Card 1: NAV (con delta solo % e line sparkline)
             st.metric(
                 "NAV",
                 f"€{price_today:.2f}",
-                delta=f"€{nav_change:+.2f} ({nav_change_pct:+.2f}%)",
+                delta=f"{nav_change_pct:+.2f}%",
                 delta_color="normal",
                 border=True,
                 chart_data=fund_prices,
                 chart_type="line",
             )
 
-            # Card 2: Daily P&L (senza delta, bar chart storico)
+            # Card 2: Daily P&L (con delta % su MV portafoglio, bar chart storico)
+            fund_pnl_pct = (daily_pnl / total_mv_yesterday * 100) if total_mv_yesterday > 0 else 0.0
             st.metric(
                 "Daily P&L",
                 f"€{daily_pnl:+,.2f}",
+                delta=f"{fund_pnl_pct:+.2f}%",
+                delta_color="normal",
                 border=True,
                 chart_data=fund_pnl_spark,
                 chart_type="bar",
