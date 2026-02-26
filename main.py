@@ -165,12 +165,18 @@ st.markdown("""
         font-weight: 700 !important;
     }
 
-    /* Active/selected pills → white background */
+    /* Active/selected pills → white border, black bg */
     button[kind="pillsActive"],
     [data-testid="stBaseButton-pillsActive"] {
-        background-color: rgba(255, 255, 255, 0.85) !important;
-        color: black !important;
+        background-color: transparent !important;
         border-color: rgba(255, 255, 255, 0.9) !important;
+    }
+
+    /* Inactive pills → dark gray border */
+    button[kind="pills"],
+    [data-testid="stBaseButton-pills"] {
+        background-color: transparent !important;
+        border-color: rgba(100, 100, 100, 0.5) !important;
     }
 </style>
 """, unsafe_allow_html=True)
