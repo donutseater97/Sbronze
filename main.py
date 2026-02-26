@@ -29,6 +29,7 @@ from config import (
 
 # Pagine dell'applicazione
 from pages.overview_and_charts import overview_and_charts
+from pages.daily_dashboard import daily_dashboard
 from pages.evolution_of_portfolio import evolution_of_portfolio
 from pages.transaction_history import transaction_history
 from pages.active_funds import active_funds
@@ -98,6 +99,11 @@ pg = st.navigation({
             lambda: overview_and_charts(funds, transactions, hist_data_global, last_date_str),
             title="📊 Overview & Charts",
             url_path="overview",
+        ),
+        st.Page(
+            lambda: daily_dashboard(funds, transactions, hist_data_global, last_date_str),
+            title="📋 Daily Dashboard",
+            url_path="dashboard",
         ),
         st.Page(
             lambda: evolution_of_portfolio(funds, transactions, hist_data_global),

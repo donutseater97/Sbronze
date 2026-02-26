@@ -105,9 +105,9 @@ def evolution_of_portfolio(
 # =============================================================================
 
 def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
-    """Stacked bar chart con return per fondo con selettore frequenza."""
+    """Stacked bar chart: solo ritorno da movimento NAV (esclusi versamenti)."""
     st.subheader("📈 Revenue P&L by Fund")
-    st.caption("Shows the return (market value change) for each fund and total portfolio")
+    st.caption("Shows the return from NAV movement only (excludes new contributions)")
 
     # Selettore frequenza
     freq_options = {
@@ -125,13 +125,12 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
         return
 
     first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
-
     hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy().reset_index(drop=True)
     if len(hist_filtered) == 0:
         st.info("No historical data available after your first transaction date.")
         return
 
-    # Calcola quantità corrente per ciascun fondo
+    # Calcola quantità corrente per ciascun fondo (as-of each date)
     tx_sorted = transactions.copy()
     tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
     tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
@@ -150,49 +149,42 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
         )
         qty_df[fund] = merged["cum_qty"].fillna(0.0)
 
-    # Market Value giornaliero
-    mv_daily = hist_filtered[["date"]].copy()
+    # Calcolo giornaliero del ritorno NAV-only:
+    # return_day = qty_day * (price_day - price_prev_day)
+    # Questo isola il movimento di prezzo, escludendo l'effetto dei versamenti
+    nav_return_daily = hist_filtered[["date"]].copy()
     for fund in filter_funds:
         price = pd.to_numeric(hist_filtered[fund], errors="coerce")
-        mv_daily[f"{fund} MV"] = qty_df[fund].values * price.values
+        price_change = price - price.shift(1)
+        nav_return_daily[fund] = qty_df[fund].values * price_change.values
 
-    mv_daily["Total MV"] = mv_daily[[f"{f} MV" for f in filter_funds]].sum(axis=1)
+    nav_return_daily = nav_return_daily.iloc[1:].reset_index(drop=True)  # drop first NaN row
 
-    # Resample alla frequenza scelta
-    mv_daily = mv_daily.set_index("date")
-    mv_resampled = mv_daily.resample(freq).last().dropna(how="all").reset_index()
+    # Resample alla frequenza scelta (somma dei ritorni nel periodo)
+    nav_return_daily = nav_return_daily.set_index("date")
+    nav_resampled = nav_return_daily.resample(freq).sum().dropna(how="all").reset_index()
 
-    if len(mv_resampled) < 2:
+    if len(nav_resampled) == 0:
         st.info("Not enough data for selected frequency.")
         return
 
-    # Delta per periodo
-    for fund in filter_funds:
-        col = f"{fund} MV"
-        mv_resampled[f"{fund} Δ"] = mv_resampled[col] - mv_resampled[col].shift(1)
-
-    delta_cols = [f"{f} Δ" for f in filter_funds]
-    mv_resampled["Total Δ"] = mv_resampled[delta_cols].sum(axis=1)
-
-    # Rimuovi prima riga (NaN dopo shift)
-    mv_resampled = mv_resampled.iloc[1:].reset_index(drop=True)
+    nav_resampled["Total"] = nav_resampled[filter_funds].sum(axis=1)
 
     # Crea stacked bar chart
     fig = go.Figure()
     for fund in filter_funds:
-        col = f"{fund} Δ"
         color = FUND_COLORS.get(fund, "#999999")
         fig.add_trace(go.Bar(
-            x=mv_resampled["date"], y=mv_resampled[col],
+            x=nav_resampled["date"], y=nav_resampled[fund],
             name=fund, marker=dict(color=color),
             hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
         ))
 
     # Traccia invisibile per totale nel tooltip
     fig.add_trace(go.Scatter(
-        x=mv_resampled["date"], y=[0] * len(mv_resampled),
+        x=nav_resampled["date"], y=[0] * len(nav_resampled),
         mode="lines", line=dict(width=0), showlegend=False,
-        hovertemplate="<b>Total</b>: €" + mv_resampled["Total Δ"].apply(lambda v: f"{v:,.2f}") + "<extra></extra>",
+        hovertemplate="<b>Total</b>: €" + nav_resampled["Total"].apply(lambda v: f"{v:,.2f}") + "<extra></extra>",
     ))
 
     fig.update_layout(
