@@ -78,87 +78,142 @@ def evolution_of_portfolio(
         )
         qty_prev_df[fund] = merged["cum_qty"].fillna(0.0).shift(1).fillna(0.0)
 
-    # ===== 1. TABELLA P/L EVOLUTION — NAV giornaliero con % =====
-    _render_daily_nav_table(hist_asc, filter_funds, first_tx_date_by_fund)
-
-    # ===== 2. GRAFICO NAV EVOLUTION =====
-    _render_daily_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund)
+    # ===== 1. REVENUE P&L BY FUND (stacked bar chart) =====
+    _render_revenue_pnl_bar(hist_asc, filter_funds, transactions)
 
     st.divider()
 
-    # ===== 3. TABELLA MARKET VALUE EVOLUTION =====
-    _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund)
+    # ===== 2. GRAFICO FUNDS NAV EVOLUTION =====
+    _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund)
 
-    # ===== 4. GRAFICO PORTFOLIO MARKET VALUE EVOLUTION =====
+    st.divider()
+
+    # ===== 3. GRAFICO PORTFOLIO MARKET VALUE EVOLUTION =====
     _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transactions)
 
-    # ===== 5. GRAFICO PORTFOLIO COMPOSITION =====
+    # ===== 4. GRAFICO PORTFOLIO COMPOSITION =====
     _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transactions, first_tx_date_by_fund)
+
+    st.divider()
+
+    # ===== 5. TABELLA MARKET VALUE EVOLUTION (in fondo) =====
+    _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund)
 
 
 # =============================================================================
 # SOTTO-FUNZIONI (private)
 # =============================================================================
 
-def _render_daily_nav_table(hist_asc, filter_funds, first_tx_date_by_fund):
-    """Tabella NAV giornaliero con variazione % dal giorno precedente."""
-    st.subheader("💹 Portfolio P/L Evolution - Daily NAV")
-    st.caption("Shows the daily NAV (price) of each fund with percentage change from previous day")
+def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
+    """Stacked bar chart con return per fondo con selettore frequenza."""
+    st.subheader("📈 Revenue P&L by Fund")
+    st.caption("Shows the return (market value change) for each fund and total portfolio")
 
-    pnl_nav_df = hist_asc[["date"]].copy()
+    # Selettore frequenza
+    freq_options = {
+        "Daily": "D", "Weekly": "W", "Monthly": "ME",
+        "Quarterly": "QE", "Semi-Annual": "2QE", "Annual": "YE",
+    }
+    freq_label = st.radio(
+        "Frequency:", list(freq_options.keys()),
+        horizontal=True, key="revenue_pnl_freq"
+    )
+    freq = freq_options[freq_label]
+
+    if len(hist_asc) == 0:
+        st.info("No historical data available.")
+        return
+
+    first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
+
+    hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy().reset_index(drop=True)
+    if len(hist_filtered) == 0:
+        st.info("No historical data available after your first transaction date.")
+        return
+
+    # Calcola quantità corrente per ciascun fondo
+    tx_sorted = transactions.copy()
+    tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+    tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
+
+    qty_df = pd.DataFrame({"date": hist_filtered["date"]})
     for fund in filter_funds:
-        price_col = pd.to_numeric(hist_asc[fund], errors="coerce")
-        pnl_nav_df[fund] = price_col
-        pnl_nav_df[f"{fund}_pct"] = price_col.pct_change() * 100
+        fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
+        if len(fund_tx) == 0:
+            qty_df[fund] = 0.0
+            continue
+        fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
+        merged = pd.merge_asof(
+            hist_filtered[["date"]],
+            fund_tx[["Date", "cum_qty"]].sort_values("Date"),
+            left_on="date", right_on="Date", direction="backward",
+        )
+        qty_df[fund] = merged["cum_qty"].fillna(0.0)
 
-    # Ordine decrescente per display
-    pnl_nav_display = pnl_nav_df.sort_values("date", ascending=False).reset_index(drop=True)
-
-    display = pnl_nav_display[["date"]].copy()
-    display["Date"] = display["date"].dt.strftime("%Y-%m-%d")
-    display = display.drop(columns=["date"])
-
+    # Market Value giornaliero
+    mv_daily = hist_filtered[["date"]].copy()
     for fund in filter_funds:
-        first_date = first_tx_date_by_fund.get(fund)
-        if first_date:
-            first_date = pd.to_datetime(first_date)
+        price = pd.to_numeric(hist_filtered[fund], errors="coerce")
+        mv_daily[f"{fund} MV"] = qty_df[fund].values * price.values
 
-            def fmt_nav(idx, fn=fund):
-                nav = pnl_nav_display[fn].iloc[idx]
-                pct = pnl_nav_display[f"{fn}_pct"].iloc[idx]
-                if pd.isna(nav):
-                    return "-"
-                nav_str = f"€{nav:.2f}"
-                if pd.isna(pct) or pct == 0:
-                    return nav_str
-                sign = "+" if pct > 0 else ""
-                return f"{nav_str} ({sign}{pct:.2f}%)"
+    mv_daily["Total MV"] = mv_daily[[f"{f} MV" for f in filter_funds]].sum(axis=1)
 
-            display[fund] = [
-                fmt_nav(i) if pd.to_datetime(pnl_nav_display["date"].iloc[i]) >= first_date else "-"
-                for i in range(len(pnl_nav_display))
-            ]
+    # Resample alla frequenza scelta
+    mv_daily = mv_daily.set_index("date")
+    mv_resampled = mv_daily.resample(freq).last().dropna(how="all").reset_index()
 
-    # Stile: verde/rosso in base alla variazione %
-    def style_fn(row):
-        styles = [""] * len(row)
-        idx = row.name
-        for col_idx, fund in enumerate(filter_funds, start=1):
-            pct = pnl_nav_display[f"{fund}_pct"].iloc[idx]
-            if pd.isna(pct) or pct == 0:
-                styles[col_idx] = ""
-            elif pct > 0:
-                styles[col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f;"
-            else:
-                styles[col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e;"
-        return styles
+    if len(mv_resampled) < 2:
+        st.info("Not enough data for selected frequency.")
+        return
 
-    st.dataframe(display.style.apply(style_fn, axis=1), width="stretch", hide_index=True)
+    # Delta per periodo
+    for fund in filter_funds:
+        col = f"{fund} MV"
+        mv_resampled[f"{fund} Δ"] = mv_resampled[col] - mv_resampled[col].shift(1)
+
+    delta_cols = [f"{f} Δ" for f in filter_funds]
+    mv_resampled["Total Δ"] = mv_resampled[delta_cols].sum(axis=1)
+
+    # Rimuovi prima riga (NaN dopo shift)
+    mv_resampled = mv_resampled.iloc[1:].reset_index(drop=True)
+
+    # Crea stacked bar chart
+    fig = go.Figure()
+    for fund in filter_funds:
+        col = f"{fund} Δ"
+        color = FUND_COLORS.get(fund, "#999999")
+        fig.add_trace(go.Bar(
+            x=mv_resampled["date"], y=mv_resampled[col],
+            name=fund, marker=dict(color=color),
+            hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
+        ))
+
+    # Traccia invisibile per totale nel tooltip
+    fig.add_trace(go.Scatter(
+        x=mv_resampled["date"], y=[0] * len(mv_resampled),
+        mode="lines", line=dict(width=0), showlegend=False,
+        hovertemplate="<b>Total</b>: €" + mv_resampled["Total Δ"].apply(lambda v: f"{v:,.2f}") + "<extra></extra>",
+    ))
+
+    fig.update_layout(
+        barmode="relative",
+        height=600, hovermode="x unified", xaxis_title="", yaxis_title=f"{freq_label} Return (€)",
+        template="plotly_white", showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        dragmode="pan", uirevision="revenue_pnl_bar",
+        newshape=dict(line_color="#888888"), margin=dict(r=20),
+    )
+    apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
+    fig.update_yaxes(
+        rangemode="normal", fixedrange=False, showspikes=True, spikemode="across",
+        zeroline=True, zerolinecolor="rgba(150,150,150,0.5)", zerolinewidth=2,
+    )
+    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("revenue_pnl_bar"))
 
 
-def _render_daily_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
-    """Grafico lineare NAV giornaliero per fondo."""
-    st.subheader("📊 Daily NAV Evolution Chart")
+def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
+    """Grafico lineare NAV per fondo."""
+    st.subheader("📊 Funds NAV Evolution Chart")
     fig = go.Figure()
     pnl_asc = hist_asc.sort_values("date", ascending=True).reset_index(drop=True)
 

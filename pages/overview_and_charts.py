@@ -329,10 +329,6 @@ def overview_and_charts(
     st.divider()
     st.header("📊 Charts")
 
-    # ===== DAILY RETURNS STACKED BAR CHART =====
-    if len(filter_funds) > 0:
-        _render_daily_returns_bar(df, filter_funds, hist_data, transactions)
-
     # ===== INVESTMENT EVOLUTION + ALLOCATION PIES =====
     if len(df) > 0:
         _render_evolution_and_allocation(df, funds, hist_data)
@@ -341,93 +337,6 @@ def overview_and_charts(
 # =============================================================================
 # SOTTO-FUNZIONI GRAFICI (private)
 # =============================================================================
-
-def _render_daily_returns_bar(df, filter_funds, hist_data, transactions):
-    """Renderizza stacked bar chart con i return giornalieri per fondo."""
-    st.subheader("📈 Revenue P&L - Daily Returns by Fund")
-    st.caption("Shows the daily return (market value change) for each fund and total portfolio")
-
-    if len(hist_data) == 0 or "date" not in hist_data.columns:
-        st.info("No historical data available.")
-        return
-
-    first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
-
-    hist_asc = hist_data[["date"] + filter_funds].copy()
-    hist_asc["date"] = pd.to_datetime(hist_asc["date"], errors="coerce")
-    hist_asc = hist_asc.dropna(subset=["date"])
-    hist_asc = hist_asc[hist_asc["date"] >= first_tx_date].sort_values("date").reset_index(drop=True)
-
-    if len(hist_asc) == 0:
-        st.info("No historical data available after your first transaction date.")
-        return
-
-    # Calcola quantità a t-1 per ciascun fondo
-    tx_sorted = transactions.copy()
-    tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
-    tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
-
-    qty_prev_df = pd.DataFrame({"date": hist_asc["date"]})
-    for fund in filter_funds:
-        fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
-        if len(fund_tx) == 0:
-            qty_prev_df[fund] = 0.0
-            continue
-        fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
-        merged = pd.merge_asof(
-            hist_asc[["date"]],
-            fund_tx[["Date", "cum_qty"]].sort_values("Date"),
-            left_on="date", right_on="Date", direction="backward",
-        )
-        qty_prev_df[fund] = merged["cum_qty"].fillna(0.0).shift(1).fillna(0.0)
-
-    # Market Value giornaliero e delta
-    mv_df = hist_asc[["date"]].copy()
-    for fund in filter_funds:
-        price = pd.to_numeric(hist_asc[fund], errors="coerce")
-        mv_df[f"{fund} MV (€)"] = qty_prev_df[fund] * price
-        mv_df[f"{fund} Δ (€)"] = (qty_prev_df[fund] * price) - (qty_prev_df[fund] * price.shift(1))
-
-    # Calcola totale giornaliero
-    delta_cols = [f"{f} Δ (€)" for f in filter_funds if f"{f} Δ (€)" in mv_df.columns]
-    mv_df["Total Δ (€)"] = mv_df[delta_cols].sum(axis=1)
-
-    # Crea stacked bar chart
-    fig = go.Figure()
-
-    for fund in filter_funds:
-        col = f"{fund} Δ (€)"
-        if col in mv_df.columns:
-            color = FUND_COLORS.get(fund, "#999999")
-            fig.add_trace(go.Bar(
-                x=mv_df["date"], y=mv_df[col],
-                name=fund,
-                marker=dict(color=color),
-                hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
-            ))
-
-    # Traccia invisibile per mostrare il totale nel tooltip
-    fig.add_trace(go.Scatter(
-        x=mv_df["date"], y=[0] * len(mv_df),
-        mode="lines", line=dict(width=0), showlegend=False,
-        hovertemplate="<b>Total</b>: €" + mv_df["Total Δ (€)"].apply(lambda v: f"{v:,.2f}") + "<extra></extra>",
-    ))
-
-    fig.update_layout(
-        barmode="relative",
-        height=600, hovermode="x unified", xaxis_title="", yaxis_title="Daily Return (€)",
-        template="plotly_white", showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        dragmode="pan", uirevision="daily_returns_bar",
-        newshape=dict(line_color="#888888"), margin=dict(r=20),
-    )
-    apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
-    fig.update_yaxes(
-        rangemode="normal", fixedrange=False, showspikes=True, spikemode="across",
-        zeroline=True, zerolinecolor="rgba(150,150,150,0.5)", zerolinewidth=2,
-    )
-    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("daily_returns_bar"))
-
 
 def _render_evolution_and_allocation(df, funds, hist_data):
     """Renderizza Investment Evolution e Allocation Pies affiancati."""
@@ -623,10 +532,33 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
             hovertemplate="<b>Market Value</b>: €%{y:,.2f}<extra></extra>",
         ))
 
+    # Annotazioni ultimo data point
+    if len(stair_df) > 0:
+        last_gc = stair_df["Gross Contribution"].iloc[-1]
+        last_gc_date = stair_df["date_dt"].iloc[-1]
+        fig.add_annotation(
+            x=last_gc_date, y=last_gc, text=f"€{last_gc:,.0f}",
+            showarrow=False, xanchor="left", xshift=10,
+            font=dict(size=13, color="#f093fb"),
+            bordercolor="#f093fb", borderwidth=1.5, borderpad=4,
+            bgcolor="rgba(255,255,255,0)",
+        )
+    if len(market_value_df) > 0:
+        last_mv = market_value_df["market_value"].iloc[-1]
+        last_mv_date = market_value_df["date"].iloc[-1]
+        fig.add_annotation(
+            x=last_mv_date, y=last_mv, text=f"€{last_mv:,.0f}",
+            showarrow=False, xanchor="left", xshift=10,
+            font=dict(size=13, color="#667eea"),
+            bordercolor="#667eea", borderwidth=1.5, borderpad=4,
+            bgcolor="rgba(255,255,255,0)",
+        )
+
     fig.update_layout(
         height=520, hovermode="x unified", xaxis_title="", yaxis_title="Value (€)",
         template="plotly_white", showlegend=False, dragmode="pan",
         uirevision="overview_evolution", newshape=dict(line_color="#888888"),
+        margin=dict(r=80),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
     fig.update_yaxes(autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
