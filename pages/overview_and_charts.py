@@ -289,11 +289,74 @@ def overview_and_charts(
     total_net_return_pct = (total_net_return / total_net * 100) if total_net > 0 else 0
     total_fees_pct = (total_fees / total_gross * 100) if total_gross > 0 else 0
 
+    # ----- Sparkline data (last 30 days) -----
+    SPARK_DAYS = 30
+    spark_return = []
+    spark_net_return = []
+    spark_daily_pnl = []
+    spark_mv = []
+    spark_gross = []
+
+    if len(hist_data) > 0 and "date" in hist_data.columns:
+        hist_asc = hist_data.sort_values("date", ascending=True)
+        spark_hist = hist_asc.tail(SPARK_DAYS + 1).reset_index(drop=True)
+
+        tx_sorted_sp = transactions.copy()
+        tx_sorted_sp["Date"] = pd.to_datetime(tx_sorted_sp["Date"], errors="coerce")
+        tx_sorted_sp = tx_sorted_sp.dropna(subset=["Date"]).sort_values("Date")
+
+        for i in range(len(spark_hist)):
+            row_sp = spark_hist.iloc[i]
+            day_mv = 0.0
+            day_gross = 0.0
+            day_net_inv = 0.0
+            for fund in filter_funds:
+                if fund not in spark_hist.columns:
+                    continue
+                p = pd.to_numeric(pd.Series([row_sp[fund]]), errors="coerce").iloc[0]
+                if pd.isna(p):
+                    continue
+                fund_txs = tx_sorted_sp[(tx_sorted_sp["Fund"] == fund) & (tx_sorted_sp["Date"] <= row_sp["date"])]
+                qty = fund_txs["Quantity"].sum() if len(fund_txs) > 0 else 0
+                day_mv += qty * p
+                day_gross += fund_txs["Gross Contribution (theor)"].sum() if "Gross Contribution (theor)" in fund_txs.columns else 0
+                day_net_inv += (fund_txs["Quantity"] * fund_txs["Price (€)"]).sum() if len(fund_txs) > 0 else 0
+
+            spark_mv.append(day_mv)
+            spark_return.append(day_mv - day_gross)
+            spark_net_return.append(day_mv - day_net_inv)
+
+            # Daily P&L
+            if i > 0:
+                prev_row_sp = spark_hist.iloc[i - 1]
+                day_pnl = 0.0
+                for fund in filter_funds:
+                    if fund not in spark_hist.columns:
+                        continue
+                    p_today = pd.to_numeric(pd.Series([row_sp[fund]]), errors="coerce").iloc[0]
+                    p_yest = pd.to_numeric(pd.Series([prev_row_sp[fund]]), errors="coerce").iloc[0]
+                    if pd.isna(p_today) or pd.isna(p_yest):
+                        continue
+                    fund_txs = tx_sorted_sp[(tx_sorted_sp["Fund"] == fund) & (tx_sorted_sp["Date"] <= row_sp["date"])]
+                    qty = fund_txs["Quantity"].sum() if len(fund_txs) > 0 else 0
+                    day_pnl += qty * (p_today - p_yest)
+                spark_daily_pnl.append(day_pnl)
+
+        # Rimuovi primo punto (non ha daily P&L)
+        spark_return = spark_return[1:]
+        spark_net_return = spark_net_return[1:]
+        spark_mv = spark_mv[1:]
+
+    # Placeholder per sparkline vuote (stessa altezza)
+    _empty_spark = [0] * max(len(spark_mv), 1)
+
     row1c1, row1c2, row1c3 = st.columns(3)
     with row1c1:
-        st.metric("Total Return", f"€ {total_return:,.2f}", delta=f"{total_return_pct:+.2f}%", delta_color="normal", border=True)
+        st.metric("Total Return", f"€ {total_return:,.2f}", delta=f"{total_return_pct:+.2f}%", delta_color="normal", border=True,
+                  chart_data=spark_return if spark_return else _empty_spark, chart_type="line")
     with row1c2:
-        st.metric("Total Net Return", f"€ {total_net_return:,.2f}", delta=f"{total_net_return_pct:+.2f}%", delta_color="normal", border=True)
+        st.metric("Total Net Return", f"€ {total_net_return:,.2f}", delta=f"{total_net_return_pct:+.2f}%", delta_color="normal", border=True,
+                  chart_data=spark_net_return if spark_net_return else _empty_spark, chart_type="line")
     with row1c3:
         # Daily P/L — calcolo diretto da dati storici e quantità
         daily_pnl_eur = 0.0
@@ -315,15 +378,19 @@ def overview_and_charts(
                 daily_pnl_prev_mv += fund_qty * float(s.iloc[1])
         daily_pnl_pct = (daily_pnl_eur / daily_pnl_prev_mv * 100) if daily_pnl_prev_mv > 0 else 0.0
         pct_sign = "+" if daily_pnl_pct > 0 else ""
-        st.metric("Daily P/L", f"€ {daily_pnl_eur:+,.2f}", delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal", border=True)
+        st.metric("Daily P/L", f"€ {daily_pnl_eur:+,.2f}", delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal", border=True,
+                  chart_data=spark_daily_pnl if spark_daily_pnl else _empty_spark, chart_type="bar")
 
     row2c1, row2c2, row2c3 = st.columns(3)
     with row2c1:
-        st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}", border=True)
+        st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}", border=True,
+                  chart_data=_empty_spark, chart_type="line")
     with row2c2:
-        st.metric("Total Market Value", f"€ {total_market_value:,.2f}", border=True)
+        st.metric("Total Market Value", f"€ {total_market_value:,.2f}", border=True,
+                  chart_data=spark_mv if spark_mv else _empty_spark, chart_type="line")
     with row2c3:
-        st.metric("Total Fees", f"€ {total_fees:,.2f}", delta=f"↓ {total_fees_pct:.2f}%", delta_color="off", border=True)
+        st.metric("Total Fees", f"€ {total_fees:,.2f}", delta=f"↓ {total_fees_pct:.2f}%", delta_color="off", border=True,
+                  chart_data=_empty_spark, chart_type="line")
 
     # ===== GRAFICI =====
     st.divider()
