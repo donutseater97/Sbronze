@@ -89,8 +89,11 @@ def evolution_of_portfolio(
     # ===== 3. TABELLA MARKET VALUE EVOLUTION =====
     _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund)
 
-    # ===== 4. GRAFICO HOLDINGS MARKET VALUE =====
-    _render_holdings_chart(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund)
+    # ===== 4. GRAFICO PORTFOLIO MARKET VALUE EVOLUTION =====
+    _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transactions)
+
+    # ===== 5. GRAFICO PORTFOLIO COMPOSITION =====
+    _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transactions, first_tx_date_by_fund)
 
 
 # =============================================================================
@@ -254,38 +257,175 @@ def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_dat
     st.dataframe(display.style.apply(style_fn, axis=1), width="stretch", hide_index=True)
 
 
-def _render_holdings_chart(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund):
-    """Grafico area impilato del valore di mercato delle posizioni."""
-    st.subheader("📊 Daily Holdings Market Value Chart")
-    fig = go.Figure()
+def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transactions):
+    """Grafico Portfolio Market Value Evolution (da overview_and_charts)."""
+    st.subheader("📉 Portfolio Market Value Evolution")
+    st.caption("Shows your portfolio market value over time, starting from your first transaction")
 
-    # Ricostruisci mv_df per il grafico
-    mv_df = hist_asc[["date"]].copy()
+    first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
+
+    hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy()
+
+    if len(hist_filtered) == 0:
+        st.info("No historical data available after your first transaction date.")
+        return
+
+    # Market Value giornaliero
+    mv_df = hist_filtered[["date"]].copy()
     for fund in filter_funds:
-        price = pd.to_numeric(hist_asc[fund], errors="coerce")
-        mv_df[f"{fund} (€)"] = qty_prev_df[fund] * price
+        price = pd.to_numeric(hist_filtered[fund], errors="coerce")
+        qty = qty_prev_df[qty_prev_df["date"].isin(hist_filtered["date"])][fund].reset_index(drop=True)
+        mv_df[f"{fund} MV (€)"] = qty * price
 
-    mv_asc = mv_df.sort_values("date", ascending=True).reset_index(drop=True)
+    total_mv = pd.DataFrame([mv_df[f"{f} MV (€)"] for f in filter_funds]).sum(axis=0)
+    mv_df["Daily MV (€)"] = total_mv
+
+    # Crea grafico
+    fig = go.Figure()
+    latest_date = mv_df["date"].max()
+
+    # Linea totale portafoglio
+    fig.add_trace(go.Scatter(
+        x=mv_df["date"], y=mv_df["Daily MV (€)"],
+        mode="lines", name="Portfolio MV",
+        line=dict(color="#667eea", width=3),
+        fill="tozeroy", fillcolor="rgba(102, 126, 234, 0.1)",
+        hovertemplate="<b>Portfolio Market Value</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>",
+    ))
+
+    # Annotazione ultimo valore totale
+    last_mv = mv_df["Daily MV (€)"].iloc[-1]
+    fig.add_annotation(
+        x=latest_date, y=last_mv, text=f"€{last_mv:,.0f}",
+        showarrow=False, xanchor="left", xshift=10,
+        font=dict(size=14, color="#667eea"),
+        bordercolor="#667eea", borderwidth=2, borderpad=4,
+        bgcolor="rgba(255,255,255,0)",
+    )
+
+    # Linee per singolo fondo
+    for fund in filter_funds:
+        col = f"{fund} MV (€)"
+        if col in mv_df.columns:
+            color = FUND_COLORS.get(fund, "#999999")
+            fig.add_trace(go.Scatter(
+                x=mv_df["date"], y=mv_df[col],
+                mode="lines", name=fund,
+                line=dict(color=color, width=2, dash="dot"),
+                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+            ))
+            last_fund_mv = mv_df[col].iloc[-1]
+            fig.add_annotation(
+                x=latest_date, y=last_fund_mv, text=f"€{last_fund_mv:,.0f}",
+                showarrow=False, xanchor="left", xshift=10,
+                font=dict(size=13, color=color),
+                bordercolor=color, borderwidth=1.5, borderpad=4,
+                bgcolor="rgba(255,255,255,0)",
+            )
+
+    # Range Y con padding
+    all_vals = [mv_df["Daily MV (€)"].min(), mv_df["Daily MV (€)"].max()]
+    for fund in filter_funds:
+        col = f"{fund} MV (€)"
+        if col in mv_df.columns:
+            all_vals.extend([mv_df[col].min(), mv_df[col].max()])
+    max_mv = max(all_vals) if all_vals else 1000
+    min_mv = min(all_vals) if all_vals else 0
+    padding = (max_mv - min_mv) * 0.05
+
+    fig.update_layout(
+        height=600, hovermode="x unified", xaxis_title="", yaxis_title="Market Value (€)",
+        template="plotly_white", showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        dragmode="pan", uirevision="portfolio_mv_evolution",
+        newshape=dict(line_color="#888888"), margin=dict(r=100),
+        yaxis=dict(range=[min_mv - padding, max_mv + padding]),
+    )
+    apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
+    fig.update_yaxes(
+        rangemode="normal", fixedrange=False, showspikes=True, spikemode="across",
+        zeroline=True, zerolinecolor="rgba(150,150,150,0.5)", zerolinewidth=2,
+    )
+    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("portfolio_mv_evolution"))
+
+
+def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transactions, first_tx_date_by_fund):
+    """Grafico Portfolio Composition (stacked area % per fund)."""
+    st.subheader("🧩 Portfolio Composition")
+    st.caption("Shows the percentage composition of your portfolio over time")
+
+    # Filtro Gross Contribution vs Market Value
+    comp_type = st.radio(
+        "View by:",
+        ["Market Value", "Gross Contribution"],
+        horizontal=True,
+        key="composition_filter"
+    )
+
+    first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
+    hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy()
+
+    if len(hist_filtered) == 0:
+        st.info("No historical data available after your first transaction date.")
+        return
+
+    comp_df = hist_filtered[["date"]].copy()
+
+    if comp_type == "Market Value":
+        # Calcola Market Value per fund
+        for fund in filter_funds:
+            price = pd.to_numeric(hist_filtered[fund], errors="coerce")
+            qty = qty_prev_df[qty_prev_df["date"].isin(hist_filtered["date"])][fund].reset_index(drop=True)
+            comp_df[fund] = qty * price
+    else:
+        # Gross Contribution cumulata per fund
+        tx_sorted = transactions.copy()
+        tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+        tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
+        tx_sorted["Gross Contribution"] = tx_sorted["Quantity"] * tx_sorted["Price (€)"] + tx_sorted["Fees (€)"]
+
+        for fund in filter_funds:
+            fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Gross Contribution"]].copy()
+            if len(fund_tx) == 0:
+                comp_df[fund] = 0.0
+                continue
+            fund_tx["cum_contrib"] = fund_tx["Gross Contribution"].cumsum()
+            merged = pd.merge_asof(
+                hist_filtered[["date"]].reset_index(drop=True),
+                fund_tx[["Date", "cum_contrib"]].sort_values("Date"),
+                left_on="date", right_on="Date", direction="backward",
+            )
+            comp_df[fund] = merged["cum_contrib"].fillna(0.0)
+
+    # Calcola percentuali
+    total = comp_df[filter_funds].sum(axis=1)
+    for fund in filter_funds:
+        comp_df[f"{fund}_pct"] = (comp_df[fund] / total * 100).fillna(0)
+
+    # Crea stacked area chart
+    fig = go.Figure()
 
     for fund in filter_funds:
         first_date = first_tx_date_by_fund.get(fund)
-        fund_data = mv_asc[mv_asc["date"] >= pd.to_datetime(first_date)] if first_date else mv_asc
+        fund_data = comp_df[comp_df["date"] >= pd.to_datetime(first_date)] if first_date else comp_df
         color = FUND_COLORS.get(fund, "#999999")
         r, g, b = hex_to_rgb(color)
         fig.add_trace(go.Scatter(
-            x=fund_data["date"], y=fund_data[f"{fund} (€)"],
+            x=fund_data["date"], y=fund_data[f"{fund}_pct"],
             mode="lines", name=fund,
-            line=dict(color=color, width=2),
-            hovertemplate=f"<b>{fund} Holdings Value</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+            line=dict(color=color, width=0),
+            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>%{{y:.2f}}%<extra></extra>",
             stackgroup="one",
-            fillcolor=f"rgba({r}, {g}, {b}, 0.3)",
+            groupnorm="percent",
+            fillcolor=f"rgba({r}, {g}, {b}, 0.7)",
         ))
 
     fig.update_layout(
-        height=500, hovermode="x unified", xaxis_title="Date", yaxis_title="Market Value (€)",
+        height=500, hovermode="x unified", xaxis_title="Date", yaxis_title="Composition (%)",
         template="plotly_white", showlegend=True,
         legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.01),
-        dragmode="pan",
+        dragmode="pan", uirevision="portfolio_composition",
+        yaxis=dict(range=[0, 100], ticksuffix="%"),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("portfolio_composition"))

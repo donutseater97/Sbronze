@@ -320,9 +320,9 @@ def overview_and_charts(
     st.divider()
     st.header("📊 Charts")
 
-    # ===== REVENUE P&L CHART =====
+    # ===== DAILY RETURNS STACKED BAR CHART =====
     if len(filter_funds) > 0:
-        _render_revenue_pnl(df, filter_funds, hist_data, transactions)
+        _render_daily_returns_bar(df, filter_funds, hist_data, transactions)
 
     # ===== INVESTMENT EVOLUTION + ALLOCATION PIES =====
     if len(df) > 0:
@@ -333,10 +333,10 @@ def overview_and_charts(
 # SOTTO-FUNZIONI GRAFICI (private)
 # =============================================================================
 
-def _render_revenue_pnl(df, filter_funds, hist_data, transactions):
-    """Renderizza il grafico Revenue P&L (Market Value nel tempo)."""
-    st.subheader("💹 Revenue P&L")
-    st.caption("Shows your portfolio market value over time, starting from your first transaction")
+def _render_daily_returns_bar(df, filter_funds, hist_data, transactions):
+    """Renderizza stacked bar chart con i return giornalieri per fondo."""
+    st.subheader("📈 Revenue P&L - Daily Returns by Fund")
+    st.caption("Shows the daily return (market value change) for each fund and total portfolio")
 
     if len(hist_data) == 0 or "date" not in hist_data.columns:
         st.info("No historical data available.")
@@ -372,82 +372,41 @@ def _render_revenue_pnl(df, filter_funds, hist_data, transactions):
         )
         qty_prev_df[fund] = merged["cum_qty"].fillna(0.0).shift(1).fillna(0.0)
 
-    # Market Value giornaliero
+    # Market Value giornaliero e delta
     mv_df = hist_asc[["date"]].copy()
     for fund in filter_funds:
         price = pd.to_numeric(hist_asc[fund], errors="coerce")
         mv_df[f"{fund} MV (€)"] = qty_prev_df[fund] * price
+        mv_df[f"{fund} Δ (€)"] = (qty_prev_df[fund] * price) - (qty_prev_df[fund] * price.shift(1))
 
-    total_mv = pd.DataFrame([mv_df[f"{f} MV (€)"] for f in filter_funds]).sum(axis=0)
-    mv_df["Daily MV (€)"] = total_mv
-
-    # Crea grafico
+    # Crea stacked bar chart
     fig = go.Figure()
-    latest_date = mv_df["date"].max()
 
-    # Linea totale portafoglio
-    fig.add_trace(go.Scatter(
-        x=mv_df["date"], y=mv_df["Daily MV (€)"],
-        mode="lines", name="Portfolio MV",
-        line=dict(color="#667eea", width=3),
-        fill="tozeroy", fillcolor="rgba(102, 126, 234, 0.1)",
-        hovertemplate="<b>Portfolio Market Value</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>",
-    ))
-
-    # Annotazione ultimo valore totale
-    last_mv = mv_df["Daily MV (€)"].iloc[-1]
-    fig.add_annotation(
-        x=latest_date, y=last_mv, text=f"€{last_mv:,.0f}",
-        showarrow=False, xanchor="left", xshift=10,
-        font=dict(size=14, color="#667eea"),
-        bordercolor="#667eea", borderwidth=2, borderpad=4,
-        bgcolor="rgba(255,255,255,0)",
-    )
-
-    # Linee per singolo fondo
     for fund in filter_funds:
-        col = f"{fund} MV (€)"
+        col = f"{fund} Δ (€)"
         if col in mv_df.columns:
             color = FUND_COLORS.get(fund, "#999999")
-            fig.add_trace(go.Scatter(
+            fig.add_trace(go.Bar(
                 x=mv_df["date"], y=mv_df[col],
-                mode="lines", name=fund,
-                line=dict(color=color, width=2, dash="dot"),
+                name=fund,
+                marker=dict(color=color),
                 hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
             ))
-            last_fund_mv = mv_df[col].iloc[-1]
-            fig.add_annotation(
-                x=latest_date, y=last_fund_mv, text=f"€{last_fund_mv:,.0f}",
-                showarrow=False, xanchor="left", xshift=10,
-                font=dict(size=13, color=color),
-                bordercolor=color, borderwidth=1.5, borderpad=4,
-                bgcolor="rgba(255,255,255,0)",
-            )
-
-    # Range Y con padding
-    all_vals = [mv_df["Daily MV (€)"].min(), mv_df["Daily MV (€)"].max()]
-    for fund in filter_funds:
-        col = f"{fund} MV (€)"
-        if col in mv_df.columns:
-            all_vals.extend([mv_df[col].min(), mv_df[col].max()])
-    max_mv = max(all_vals) if all_vals else 1000
-    min_mv = min(all_vals) if all_vals else 0
-    padding = (max_mv - min_mv) * 0.05
 
     fig.update_layout(
-        height=600, hovermode="x unified", xaxis_title="", yaxis_title="Market Value (€)",
+        barmode="relative",
+        height=600, hovermode="x unified", xaxis_title="", yaxis_title="Daily Return (€)",
         template="plotly_white", showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        dragmode="pan", uirevision="revenue_pnl",
-        newshape=dict(line_color="#888888"), margin=dict(r=100),
-        yaxis=dict(range=[min_mv - padding, max_mv + padding]),
+        dragmode="pan", uirevision="daily_returns_bar",
+        newshape=dict(line_color="#888888"), margin=dict(r=20),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
     fig.update_yaxes(
         rangemode="normal", fixedrange=False, showspikes=True, spikemode="across",
         zeroline=True, zerolinecolor="rgba(150,150,150,0.5)", zerolinewidth=2,
     )
-    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("revenue_pnl"))
+    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("daily_returns_bar"))
 
 
 def _render_evolution_and_allocation(df, funds, hist_data):
@@ -505,7 +464,7 @@ def _render_evolution_and_allocation(df, funds, hist_data):
             ], ignore_index=True)
 
     # ----- Layout: Allocation (sinistra) + Evolution (destra) -----
-    col_pie, col_evo = st.columns([1, 1.2])
+    col_pie, col_evo = st.columns([1, 1])
 
     with col_pie:
         _render_allocation_pies(df, funds, hist_data_local)
@@ -535,7 +494,13 @@ def _render_allocation_pies(df, funds, hist_data):
     if alloc_by == "Fund":
         alloc_gc = df.groupby("Fund")["invested"].sum().reset_index().sort_values("invested", ascending=False)
         alloc_gc.columns = ["Category", "Value"]
-        color_map = {c: FUND_COLORS.get(c, "#999999") for c in alloc_gc["Category"]}
+        # Colori meno luminosi per i fund: aggiungiamo trasparenza
+        from components.styling import hex_to_rgb
+        color_map = {}
+        for c in alloc_gc["Category"]:
+            base_color = FUND_COLORS.get(c, "#999999")
+            r, g, b = hex_to_rgb(base_color)
+            color_map[c] = f"rgba({r}, {g}, {b}, 0.7)"
     elif alloc_by == "Type":
         tmp = df.merge(funds[["Fund", "Type"]], on="Fund", how="left")
         alloc_gc = tmp.groupby("Type")["invested"].sum().reset_index().sort_values("invested", ascending=False)
@@ -621,7 +586,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df):
     fig.add_trace(go.Scatter(
         x=stair_df["date_dt"], y=stair_df["Gross Contribution"],
         mode="lines", name="Gross Contribution",
-        line=dict(color="#667eea", width=2.5),
+        line=dict(color="#f093fb", width=2.5),
         hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
         fill="tozeroy", fillcolor="rgba(102, 126, 234, 0.1)",
     ))
@@ -631,7 +596,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df):
         fig.add_trace(go.Scatter(
             x=market_value_df["date"], y=market_value_df["market_value"],
             mode="lines", name="Market Value",
-            line=dict(color="#f093fb", width=2.5),
+            line=dict(color="#667eea", width=2.5),
             hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
         ))
 
@@ -649,8 +614,8 @@ def _render_investment_evolution_chart(stair_df, market_value_df):
     legend_style = "display:flex; justify-content:center; flex-wrap:nowrap; gap:16px; align-items:center; overflow-x:auto; padding:6px 0; border-top:1px solid rgba(150,150,150,.2);"
     st.markdown(
         f"<div style='{legend_style}'>"
-        f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #667eea;vertical-align:middle;margin-right:6px;'></span>Gross Contribution</div>"
-        f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #f093fb;vertical-align:middle;margin-right:6px;'></span>Market Value</div>"
+        f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #f093fb;vertical-align:middle;margin-right:6px;'></span>Gross Contribution</div>"
+        f"<div><span style='display:inline-block;width:28px;height:0;border-top:3px solid #667eea;vertical-align:middle;margin-right:6px;'></span>Market Value</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
