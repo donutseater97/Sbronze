@@ -114,10 +114,12 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
         "Daily": "D", "Weekly": "W", "Monthly": "ME",
         "Quarterly": "QE", "Semi-Annual": "2QE", "Annual": "YE",
     }
-    freq_label = st.radio(
+    freq_label = st.segmented_control(
         "Frequency:", list(freq_options.keys()),
-        horizontal=True, key="revenue_pnl_freq"
+        default="Daily", key="revenue_pnl_freq"
     )
+    if freq_label is None:
+        freq_label = "Daily"
     freq = freq_options[freq_label]
 
     if len(hist_asc) == 0:
@@ -421,12 +423,14 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
     st.caption("Shows the percentage composition of your portfolio over time")
 
     # Filtro Gross Contribution vs Market Value
-    comp_type = st.radio(
+    comp_type = st.segmented_control(
         "View by:",
         ["Market Value", "Gross Contribution"],
-        horizontal=True,
+        default="Market Value",
         key="composition_filter"
     )
+    if comp_type is None:
+        comp_type = "Market Value"
 
     first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
     hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy().reset_index(drop=True)

@@ -164,28 +164,6 @@ st.markdown("""
         font-size: 1.05rem !important;
         font-weight: 700 !important;
     }
-
-    /* Bottoni filtro fondi — primary (attivo) */
-    button[kind="primary"] {
-        background-color: rgba(200, 215, 200, 0.8) !important;
-        color: rgba(30, 30, 30, 1) !important;
-        font-weight: 600 !important;
-        border: none !important;
-    }
-
-    /* Bottone reset (✕) */
-    button[aria-label="✕"][kind="secondary"] {
-        background-color: rgba(30, 30, 30, 0.9) !important;
-        color: rgba(150, 150, 150, 0.8) !important;
-        border: none !important;
-    }
-
-    /* Bottoni filtro — secondary (inattivo) */
-    button[kind="secondary"] {
-        background-color: rgba(40, 40, 40, 0.9) !important;
-        color: rgba(200, 50, 50, 0.8) !important;
-        border: none !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
