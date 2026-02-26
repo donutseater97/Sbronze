@@ -220,7 +220,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                 mode="lines",
                 name=fund,
                 line=dict(color=color, width=2),
-                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>%{{y:+.2f}}%<extra></extra>",
+                hovertemplate=f"<b>{fund}</b>: %{{y:+.2f}}%<extra></extra>",
                 showlegend=False,
             ),
             row=1,
@@ -281,7 +281,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                 mode="lines",
                 name=fund,
                 line=dict(color=color, width=2),
-                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+                hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
                 showlegend=False,
             ),
             row=row,
@@ -297,7 +297,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                     mode="lines",
                     name=f"{fund} Avg NAV",
                     line=dict(color=color, dash="dash", width=1.5),
-                    hovertemplate=f"<b>{fund} Avg NAV</b><br>€%{{y:,.2f}}<extra></extra>",
+                    hovertemplate=f"<b>{fund} Avg NAV</b>: €%{{y:,.2f}}<extra></extra>",
                     showlegend=False,
                 ),
                 row=row,
@@ -495,7 +495,7 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
         x=fund_df["date"], y=fund_df[fund],
         mode="lines", name=fund,
         line=dict(color=color, width=2),
-        hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+        hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
         showlegend=False,
     ))
 
@@ -506,7 +506,7 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
             y=[avg_nav_by_fund[fund], avg_nav_by_fund[fund]],
             mode="lines", name=f"{fund} Avg NAV",
             line=dict(color=color, dash="dash", width=1.5),
-            hovertemplate=f"<b>{fund} Avg NAV</b><br>€%{{y:,.2f}}<extra></extra>",
+            hovertemplate=f"<b>{fund} Avg NAV</b>: €%{{y:,.2f}}<extra></extra>",
             showlegend=False,
         ))
 

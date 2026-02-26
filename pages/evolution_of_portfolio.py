@@ -169,7 +169,7 @@ def _render_daily_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
             x=fund_data["date"], y=fund_data[fund],
             mode="lines", name=fund,
             line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
-            hovertemplate=f"<b>{fund} NAV</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+            hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
         ))
 
     fig.update_layout(
@@ -258,27 +258,46 @@ def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_dat
 
 
 def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transactions):
-    """Grafico Portfolio Market Value Evolution (da overview_and_charts)."""
+    """Grafico Portfolio Market Value Evolution."""
     st.subheader("📉 Portfolio Market Value Evolution")
     st.caption("Shows your portfolio market value over time, starting from your first transaction")
 
     first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
 
-    hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy()
+    # Calcola quantità corrente (non t-1) per ciascun fondo
+    tx_sorted = transactions.copy()
+    tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+    tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
 
-    if len(hist_filtered) == 0:
-        st.info("No historical data available after your first transaction date.")
-        return
+    qty_current_df = pd.DataFrame({"date": hist_asc["date"]})
+    for fund in filter_funds:
+        fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
+        if len(fund_tx) == 0:
+            qty_current_df[fund] = 0.0
+            continue
+        fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
+        merged = pd.merge_asof(
+            hist_asc[["date"]],
+            fund_tx[["Date", "cum_qty"]].sort_values("Date"),
+            left_on="date", right_on="Date", direction="backward",
+        )
+        qty_current_df[fund] = merged["cum_qty"].fillna(0.0)
 
     # Market Value giornaliero
-    mv_df = hist_filtered[["date"]].copy()
+    mv_df = hist_asc[["date"]].copy().reset_index(drop=True)
     for fund in filter_funds:
-        price = pd.to_numeric(hist_filtered[fund], errors="coerce")
-        qty = qty_prev_df[qty_prev_df["date"].isin(hist_filtered["date"])][fund].reset_index(drop=True)
+        price = pd.to_numeric(hist_asc[fund], errors="coerce").reset_index(drop=True)
+        qty = qty_current_df[fund].reset_index(drop=True)
         mv_df[f"{fund} MV (€)"] = qty * price
 
-    total_mv = pd.DataFrame([mv_df[f"{f} MV (€)"] for f in filter_funds]).sum(axis=0)
-    mv_df["Daily MV (€)"] = total_mv
+    mv_df["Daily MV (€)"] = mv_df[[f"{f} MV (€)" for f in filter_funds]].sum(axis=1)
+
+    # Filtra da prima transazione
+    mv_df = mv_df[mv_df["date"] >= first_tx_date].reset_index(drop=True)
+
+    if len(mv_df) == 0:
+        st.info("No historical data available after your first transaction date.")
+        return
 
     # Crea grafico
     fig = go.Figure()
@@ -290,7 +309,7 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
         mode="lines", name="Portfolio MV",
         line=dict(color="#667eea", width=3),
         fill="tozeroy", fillcolor="rgba(102, 126, 234, 0.1)",
-        hovertemplate="<b>Portfolio Market Value</b><br>%{x|%Y-%m-%d}<br>€%{y:,.2f}<extra></extra>",
+        hovertemplate="<b>Portfolio MV</b>: €%{y:,.2f}<extra></extra>",
     ))
 
     # Annotazione ultimo valore totale
@@ -312,7 +331,7 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
                 x=mv_df["date"], y=mv_df[col],
                 mode="lines", name=fund,
                 line=dict(color=color, width=2, dash="dot"),
-                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+                hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
             ))
             last_fund_mv = mv_df[col].iloc[-1]
             fig.add_annotation(
@@ -363,7 +382,7 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
     )
 
     first_tx_date = pd.to_datetime(transactions["Date"], errors="coerce").min()
-    hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy()
+    hist_filtered = hist_asc[hist_asc["date"] >= first_tx_date].copy().reset_index(drop=True)
 
     if len(hist_filtered) == 0:
         st.info("No historical data available after your first transaction date.")
@@ -372,11 +391,29 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
     comp_df = hist_filtered[["date"]].copy()
 
     if comp_type == "Market Value":
-        # Calcola Market Value per fund
+        # Calcola quantità corrente (non t-1) per ciascun fondo
+        tx_sorted = transactions.copy()
+        tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
+        tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
+
+        qty_current_df = pd.DataFrame({"date": hist_filtered["date"]})
         for fund in filter_funds:
-            price = pd.to_numeric(hist_filtered[fund], errors="coerce")
-            qty = qty_prev_df[qty_prev_df["date"].isin(hist_filtered["date"])][fund].reset_index(drop=True)
-            comp_df[fund] = qty * price
+            fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Quantity"]].copy()
+            if len(fund_tx) == 0:
+                qty_current_df[fund] = 0.0
+                continue
+            fund_tx["cum_qty"] = fund_tx["Quantity"].cumsum()
+            merged = pd.merge_asof(
+                hist_filtered[["date"]],
+                fund_tx[["Date", "cum_qty"]].sort_values("Date"),
+                left_on="date", right_on="Date", direction="backward",
+            )
+            qty_current_df[fund] = merged["cum_qty"].fillna(0.0).values
+
+        for fund in filter_funds:
+            price = pd.to_numeric(hist_filtered[fund], errors="coerce").reset_index(drop=True)
+            qty = qty_current_df[fund].reset_index(drop=True)
+            comp_df[fund] = (qty * price).fillna(0.0)
     else:
         # Gross Contribution cumulata per fund
         tx_sorted = transactions.copy()
@@ -391,30 +428,23 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
                 continue
             fund_tx["cum_contrib"] = fund_tx["Gross Contribution"].cumsum()
             merged = pd.merge_asof(
-                hist_filtered[["date"]].reset_index(drop=True),
+                comp_df[["date"]],
                 fund_tx[["Date", "cum_contrib"]].sort_values("Date"),
                 left_on="date", right_on="Date", direction="backward",
             )
-            comp_df[fund] = merged["cum_contrib"].fillna(0.0)
+            comp_df[fund] = merged["cum_contrib"].fillna(0.0).values
 
-    # Calcola percentuali
-    total = comp_df[filter_funds].sum(axis=1)
-    for fund in filter_funds:
-        comp_df[f"{fund}_pct"] = (comp_df[fund] / total * 100).fillna(0)
-
-    # Crea stacked area chart
+    # Crea stacked area chart con valori assoluti e groupnorm="percent"
     fig = go.Figure()
 
     for fund in filter_funds:
-        first_date = first_tx_date_by_fund.get(fund)
-        fund_data = comp_df[comp_df["date"] >= pd.to_datetime(first_date)] if first_date else comp_df
         color = FUND_COLORS.get(fund, "#999999")
         r, g, b = hex_to_rgb(color)
         fig.add_trace(go.Scatter(
-            x=fund_data["date"], y=fund_data[f"{fund}_pct"],
+            x=comp_df["date"], y=comp_df[fund],
             mode="lines", name=fund,
-            line=dict(color=color, width=0),
-            hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>%{{y:.2f}}%<extra></extra>",
+            line=dict(color=color, width=0.5),
+            hovertemplate=f"<b>{fund}</b>: %{{y:.2f}}%<extra></extra>",
             stackgroup="one",
             groupnorm="percent",
             fillcolor=f"rgba({r}, {g}, {b}, 0.7)",

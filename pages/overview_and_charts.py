@@ -295,18 +295,27 @@ def overview_and_charts(
     with row1c2:
         st.metric("Total Net Return", f"€ {total_net_return:,.2f}", delta=f"{total_net_return_pct:+.2f}%", delta_color="normal")
     with row1c3:
-        # Daily P/L (se disponibile nello stato sessione)
-        if "pnl_df" in st.session_state and len(st.session_state.pnl_df) > 0:
-            pnl_latest = st.session_state.pnl_df.iloc[0]
-            daily_eur = pnl_latest.get("Daily P/L (€)")
-            daily_pct = pnl_latest.get("Daily P/L (%)")
-            if pd.notna(daily_eur) and pd.notna(daily_pct):
-                pct_sign = "+" if daily_pct > 0 else ""
-                st.metric("Daily P/L", f"€ {daily_eur:+,.2f}", delta=f"{pct_sign}{daily_pct:.2f}%", delta_color="normal")
-            else:
-                st.metric("Daily P/L", "€ 0.00")
-        else:
-            st.metric("Daily P/L", "€ 0.00")
+        # Daily P/L — calcolo diretto da dati storici e quantità
+        daily_pnl_eur = 0.0
+        daily_pnl_prev_mv = 0.0
+        if len(hist_data) > 0 and "date" in hist_data.columns:
+            hist_desc = hist_data.sort_values("date", ascending=False)
+            tx_sorted_pnl = transactions.copy()
+            tx_sorted_pnl["Date"] = pd.to_datetime(tx_sorted_pnl["Date"], errors="coerce")
+            tx_sorted_pnl = tx_sorted_pnl.dropna(subset=["Date"]).sort_values("Date")
+            for fund in filter_funds:
+                if fund not in hist_desc.columns:
+                    continue
+                s = pd.to_numeric(hist_desc[fund], errors="coerce")
+                if len(s) < 2 or pd.isna(s.iloc[0]) or pd.isna(s.iloc[1]):
+                    continue
+                fund_qty = tx_sorted_pnl[tx_sorted_pnl["Fund"] == fund]["Quantity"].sum()
+                price_change = float(s.iloc[0]) - float(s.iloc[1])
+                daily_pnl_eur += fund_qty * price_change
+                daily_pnl_prev_mv += fund_qty * float(s.iloc[1])
+        daily_pnl_pct = (daily_pnl_eur / daily_pnl_prev_mv * 100) if daily_pnl_prev_mv > 0 else 0.0
+        pct_sign = "+" if daily_pnl_pct > 0 else ""
+        st.metric("Daily P/L", f"€ {daily_pnl_eur:+,.2f}", delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal")
 
     row2c1, row2c2, row2c3 = st.columns(3)
     with row2c1:
@@ -379,6 +388,10 @@ def _render_daily_returns_bar(df, filter_funds, hist_data, transactions):
         mv_df[f"{fund} MV (€)"] = qty_prev_df[fund] * price
         mv_df[f"{fund} Δ (€)"] = (qty_prev_df[fund] * price) - (qty_prev_df[fund] * price.shift(1))
 
+    # Calcola totale giornaliero
+    delta_cols = [f"{f} Δ (€)" for f in filter_funds if f"{f} Δ (€)" in mv_df.columns]
+    mv_df["Total Δ (€)"] = mv_df[delta_cols].sum(axis=1)
+
     # Crea stacked bar chart
     fig = go.Figure()
 
@@ -390,8 +403,15 @@ def _render_daily_returns_bar(df, filter_funds, hist_data, transactions):
                 x=mv_df["date"], y=mv_df[col],
                 name=fund,
                 marker=dict(color=color),
-                hovertemplate=f"<b>{fund}</b><br>%{{x|%Y-%m-%d}}<br>€%{{y:,.2f}}<extra></extra>",
+                hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
             ))
+
+    # Traccia invisibile per mostrare il totale nel tooltip
+    fig.add_trace(go.Scatter(
+        x=mv_df["date"], y=[0] * len(mv_df),
+        mode="lines", line=dict(width=0), showlegend=False,
+        hovertemplate="<b>Total</b>: €" + mv_df["Total Δ (€)"].apply(lambda v: f"{v:,.2f}") + "<extra></extra>",
+    ))
 
     fig.update_layout(
         barmode="relative",
@@ -470,7 +490,7 @@ def _render_evolution_and_allocation(df, funds, hist_data):
         _render_allocation_pies(df, funds, hist_data_local)
 
     with col_evo:
-        _render_investment_evolution_chart(stair_df, market_value_df)
+        _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filter=True)
 
 
 def _render_allocation_pies(df, funds, hist_data):
@@ -577,9 +597,12 @@ def _render_allocation_pies(df, funds, hist_data):
     st.markdown(legend_html, unsafe_allow_html=True)
 
 
-def _render_investment_evolution_chart(stair_df, market_value_df):
+def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filter=False):
     """Renderizza il grafico Investment Evolution (contributi step + market value)."""
     st.subheader("📈 Investment Evolution")
+    if has_alloc_filter:
+        # Spacer per allineare con il selectbox "Group by" nella colonna allocation
+        st.markdown("")
     fig = go.Figure()
 
     # Linea contributi (stair-step)
@@ -587,7 +610,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df):
         x=stair_df["date_dt"], y=stair_df["Gross Contribution"],
         mode="lines", name="Gross Contribution",
         line=dict(color="#f093fb", width=2.5),
-        hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+        hovertemplate="<b>Gross Contribution</b>: €%{y:,.2f}<extra></extra>",
         fill="tozeroy", fillcolor="rgba(102, 126, 234, 0.1)",
     ))
 
@@ -597,7 +620,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df):
             x=market_value_df["date"], y=market_value_df["market_value"],
             mode="lines", name="Market Value",
             line=dict(color="#667eea", width=2.5),
-            hovertemplate="<b>%{x|%Y-%m-%d}</b><br>€%{y:,.2f}<extra></extra>",
+            hovertemplate="<b>Market Value</b>: €%{y:,.2f}<extra></extra>",
         ))
 
     fig.update_layout(
