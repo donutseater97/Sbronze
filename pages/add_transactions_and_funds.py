@@ -75,7 +75,7 @@ def add_transactions_and_funds(
                 else:
                     # Crea nuova riga transazione
                     new_row = pd.DataFrame([{
-                        "Date": contrib_date.strftime("%Y-%m-%d 00:00:00"),
+                        "Date": pd.Timestamp(contrib_date),
                         "Fund": fund_choice,
                         "Price (€)": price,
                         "Quantity": quantity,
@@ -85,6 +85,7 @@ def add_transactions_and_funds(
 
                     # Salva localmente
                     trans_to_save = transactions.copy()
+                    trans_to_save["Date"] = pd.to_datetime(trans_to_save["Date"], errors="coerce")
                     trans_to_save["Date"] = trans_to_save["Date"].dt.strftime("%Y-%m-%d %H:%M:%S")
                     trans_to_save.to_csv(TRANSACTIONS_FILE, index=False)
 
