@@ -106,20 +106,31 @@ def evolution_of_portfolio(
 
 def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
     """Stacked bar chart: solo ritorno da movimento NAV (esclusi versamenti)."""
-    st.subheader("📈 Revenue P&L by Fund")
-    st.caption("Shows the return from NAV movement only (excludes new contributions)")
+    st.subheader("📈 Absolute and % Change by Fund")
+    st.caption("Shows NAV-only change by fund (excludes new contributions), in absolute € or %")
 
     # Selettore frequenza
     freq_options = {
         "1D": "D", "1W": "W", "1M": "ME",
         "3M": "QE", "6M": "2QE", "1Y": "YE",
     }
-    freq_label = st.segmented_control(
-        "Frequency:", list(freq_options.keys()),
-        default="1D", key="revenue_pnl_freq"
-    )
+    controls_col_l, controls_col_r = st.columns([3, 2])
+    with controls_col_l:
+        freq_label = st.segmented_control(
+            "Frequency", list(freq_options.keys()),
+            default="1D", key="revenue_pnl_freq"
+        )
+    with controls_col_r:
+        display_mode = st.segmented_control(
+            "Display",
+            ["Absolute (€)", "Percentage (%)"],
+            default="Absolute (€)",
+            key="revenue_pnl_display_mode",
+        )
     if freq_label is None:
         freq_label = "1D"
+    if display_mode is None:
+        display_mode = "Absolute (€)"
     freq = freq_options[freq_label]
 
     if len(hist_asc) == 0:
@@ -155,46 +166,74 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
     # return_day = qty_day * (price_day - price_prev_day)
     # Questo isola il movimento di prezzo, escludendo l'effetto dei versamenti
     nav_return_daily = hist_filtered[["date"]].copy()
+    market_value_daily = hist_filtered[["date"]].copy()
     for fund in filter_funds:
         price = pd.to_numeric(hist_filtered[fund], errors="coerce")
         price_change = price - price.shift(1)
         nav_return_daily[fund] = qty_df[fund].values * price_change.values
+        market_value_daily[fund] = qty_df[fund].values * price.values
 
     nav_return_daily = nav_return_daily.iloc[1:].reset_index(drop=True)  # drop first NaN row
 
     # Resample alla frequenza scelta (somma dei ritorni nel periodo)
     nav_return_daily = nav_return_daily.set_index("date")
-    nav_resampled = nav_return_daily.resample(freq).sum().dropna(how="all").reset_index()
+    nav_abs_resampled = nav_return_daily.resample(freq).sum(min_count=1).dropna(how="all")
 
-    if len(nav_resampled) == 0:
+    if len(nav_abs_resampled) == 0:
         st.info("Not enough data for selected frequency.")
         return
 
-    nav_resampled["Total"] = nav_resampled[filter_funds].sum(axis=1)
+    # Base per percentuali: market value di fine periodo precedente
+    mv_resampled_last = (
+        market_value_daily
+        .set_index("date")
+        .resample(freq)
+        .last()
+        .reindex(nav_abs_resampled.index)
+    )
+
+    if display_mode == "Percentage (%)":
+        prev_mv = mv_resampled_last[filter_funds].shift(1)
+        nav_pct_resampled = nav_abs_resampled[filter_funds].div(prev_mv.where(prev_mv != 0)).mul(100)
+
+        total_abs = nav_abs_resampled[filter_funds].sum(axis=1)
+        total_prev_mv = mv_resampled_last[filter_funds].sum(axis=1).shift(1)
+        nav_pct_resampled["Total"] = total_abs.div(total_prev_mv.where(total_prev_mv != 0)).mul(100)
+
+        chart_df = nav_pct_resampled.reset_index()
+        yaxis_title = f"{freq_label} Change (%)"
+        hover_fmt = "%{y:,.2f}%"
+        total_fmt = lambda v: "-" if pd.isna(v) else f"{v:,.2f}%"
+    else:
+        nav_abs_resampled["Total"] = nav_abs_resampled[filter_funds].sum(axis=1)
+        chart_df = nav_abs_resampled.reset_index()
+        yaxis_title = f"{freq_label} Change (€)"
+        hover_fmt = "€%{y:,.2f}"
+        total_fmt = lambda v: f"€{v:,.2f}"
 
     # Crea stacked bar chart
     fig = go.Figure()
     for fund in filter_funds:
         color = FUND_COLORS.get(fund, "#999999")
         fig.add_trace(go.Bar(
-            x=nav_resampled["date"], y=nav_resampled[fund],
+            x=chart_df["date"], y=chart_df[fund],
             name=fund, marker=dict(color=color),
-            hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
+            hovertemplate=f"<b>{fund}</b>: {hover_fmt}<extra></extra>",
         ))
 
     # Traccia invisibile per totale nel tooltip
     fig.add_trace(go.Scatter(
-        x=nav_resampled["date"], y=[0] * len(nav_resampled),
+        x=chart_df["date"], y=[0] * len(chart_df),
         mode="lines", line=dict(width=0), showlegend=False,
-        hovertemplate="<b>Total</b>: €" + nav_resampled["Total"].apply(lambda v: f"{v:,.2f}") + "<extra></extra>",
+        hovertemplate="<b>Total</b>: " + chart_df["Total"].apply(total_fmt) + "<extra></extra>",
     ))
 
     fig.update_layout(
         barmode="relative",
-        height=600, hovermode="x unified", xaxis_title="", yaxis_title=f"{freq_label} Return (€)",
+        height=600, hovermode="x unified", xaxis_title="", yaxis_title=yaxis_title,
         template="plotly_white", showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        dragmode="pan", uirevision="revenue_pnl_bar",
+        dragmode="pan", uirevision="absolute_pct_change_by_fund",
         newshape=dict(line_color="#888888"), margin=dict(r=20),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
@@ -202,7 +241,7 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
         rangemode="normal", fixedrange=False, showspikes=True, spikemode="across",
         zeroline=True, zerolinecolor="rgba(150,150,150,0.5)", zerolinewidth=2,
     )
-    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("revenue_pnl_bar"))
+    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("absolute_pct_change_by_fund"))
 
 
 def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):

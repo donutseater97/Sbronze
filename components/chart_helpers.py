@@ -5,6 +5,7 @@ Contiene configurazioni comuni per layout, assi, range selector e config
 di esportazione, evitando duplicazione tra le varie pagine.
 """
 
+import pandas as pd
 import plotly.graph_objects as go
 
 
@@ -78,6 +79,8 @@ def apply_standard_xaxis(fig: go.Figure, buttons: list | None = None) -> None:
     """Applica configurazione standard all'asse X di un grafico.
 
     Include range slider, range selector buttons e spike lines.
+    Quando l'asse X contiene date, applica un piccolo padding a destra
+    per evitare che l'ultimo punto/label resti schiacciato sul bordo.
 
     Args:
         fig:     Figura Plotly da configurare.
@@ -86,7 +89,7 @@ def apply_standard_xaxis(fig: go.Figure, buttons: list | None = None) -> None:
     if buttons is None:
         buttons = RANGE_SELECTOR_BUTTONS
 
-    fig.update_xaxes(
+    xaxis_cfg = dict(
         rangeslider=dict(visible=True, thickness=0.07),
         rangeselector=dict(buttons=buttons),
         showspikes=True,
@@ -95,6 +98,31 @@ def apply_standard_xaxis(fig: go.Figure, buttons: list | None = None) -> None:
         spikethickness=1,
         spikecolor="#888888",
     )
+
+    # Calcola range esplicito per assi data, con leggero padding destro
+    # per mostrare l'ultimo punto vicino al bordo senza tagliare annotazioni.
+    x_values = []
+    for trace in fig.data:
+        x_data = getattr(trace, "x", None)
+        if x_data is None:
+            continue
+        x_values.extend([x for x in x_data if x is not None])
+
+    if x_values:
+        x_dt = pd.to_datetime(pd.Series(x_values), errors="coerce").dropna()
+        if len(x_dt) > 0:
+            x_min = x_dt.min()
+            x_max = x_dt.max()
+            if x_max > x_min:
+                right_padding = max((x_max - x_min) * 0.04, pd.Timedelta(days=2))
+            else:
+                right_padding = pd.Timedelta(days=2)
+
+            xaxis_cfg["autorange"] = False
+            xaxis_cfg["range"] = [x_min, x_max + right_padding]
+            xaxis_cfg["rangeslider"]["range"] = [x_min, x_max]
+
+    fig.update_xaxes(**xaxis_cfg)
 
 
 def apply_standard_yaxis(fig: go.Figure, title: str = "", fixed: bool = False) -> None:

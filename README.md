@@ -9,15 +9,16 @@ Traccia investimenti, visualizza performance e ottieni insight sul tuo portafogl
 - **Filtro fondi**: seleziona singoli fondi o visualizza tutto il portafoglio
 - **Mascheramento dati**: 🔒 nascondi valori sensibili ("***.*€") durante condivisione schermo
 - **Metriche chiave**: Gross Contributions, Net Invested, Market Value, Total & Net Returns, Month-over-Month, pesi di portafoglio
-- **Revenue P&L Chart**: profitto/perdita cumulativo giornaliero per fondo + totale portafoglio
 - **Investment Evolution**: contributi lordi a scalini + overlay Market Value
+- **Date-axis auto-fit**: i grafici con asse data usano tutta la larghezza, con ultimo punto vicino al bordo destro ma con spazio per l'etichetta finale
 - **Allocation Pies**: doppio grafico (Gross vs Market Value) raggruppabile per Fund, Type o Asset Manager
 
 ### 📊 Evolution of Portfolio
-- **Daily NAV Table**: variazioni giornaliere assolute e percentuali per fondo
-- **NAV Chart**: andamento NAV del portafoglio
-- **Market Value Table**: evoluzione del controvalore
-- **Holdings Area Chart**: composizione del portafoglio nel tempo
+- **Absolute and % Change by Fund**: variazione NAV-only per fondo con filtro frequenza (1D, 1W, 1M, 3M, 6M, 1Y) e switch display Absolute (€) / Percentage (%)
+- **Funds NAV Evolution Chart**: andamento NAV per fondo
+- **Portfolio Market Value Evolution**: evoluzione controvalore totale + singoli fondi
+- **Portfolio Composition**: composizione % nel tempo (Market Value o Gross Contribution)
+- **Market Value Evolution Table**: delta giornaliero € per fondo + totale
 
 ### 📈 Historical Data Charts
 - **Combined View**: tutti i fondi su un unico grafico con linee media NAV
@@ -154,7 +155,7 @@ $DPP(t) = \sum_{f} \left[ qty_f(t-1) \times \left( price_f(t) - price_f(t-1) \ri
 ### Personalizzare i grafici
 - Modifica `FUND_COLORS` in `config.py` per i colori
 - Modifica layout in `pages/overview_and_charts.py` e `pages/historical_prices.py`
-- Configurazione assi/range in `components/chart_helpers.py`
+- Configurazione assi/range in `components/chart_helpers.py` (padding destro automatico su asse data per visibilità ultimo datapoint/label)
 
 ### Script utility
 ```bash
@@ -175,6 +176,6 @@ Progetto privato — usare come riferimento per il proprio portfolio tracker.
 
 ---
 
-**Ultimo aggiornamento**: Gennaio 2026
-**Versione**: 2.0 (ristrutturazione modulare)
+**Ultimo aggiornamento**: Aprile 2026
+**Versione**: 2.1 (Absolute/% Change + date-axis fit)
 **Status**: Production Ready

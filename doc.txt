@@ -10,12 +10,13 @@
 7. [Data Masking Helpers](#section-7)
 8. [Overview and Charts](#section-8)
 9. [Evolution of Portfolio](#section-9)
-10. [Transaction History](#section-10)
-11. [Active Funds](#section-11)
-12. [Historical Prices Charts](#section-12)
-13. [Add Transactions and Funds](#section-13)
-14. [Theme and Navigation Setup](#section-14)
-15. [Glossary](#glossary)
+10. [Date-Axis Fit and Right Padding](#section-10)
+11. [Transaction History](#section-11)
+12. [Active Funds](#section-12)
+13. [Historical Prices Charts](#section-13)
+14. [Add Transactions and Funds](#section-14)
+15. [Theme and Navigation Setup](#section-15)
+16. [Glossary](#glossary)
 
 ---
 
@@ -171,19 +172,42 @@
 ---
 
 
-## <a name="section-9"></a>9. Evolution of Portfolio (Lines 1258–1263)
-- **Purpose:** Placeholder for a future detailed portfolio evolution page.
-- **Variables:**
-  - None
+## <a name="section-9"></a>9. Evolution of Portfolio (`pages/evolution_of_portfolio.py`)
+- **Purpose:** Mostra l'evoluzione del portafoglio con viste complementari su rendimento, NAV, controvalore e composizione.
+- **Main blocks:**
+  - `Absolute and % Change by Fund`: stacked bar NAV-only (esclude nuovi versamenti), con frequenza `1D`, `1W`, `1M`, `3M`, `6M`, `1Y`.
+  - `Display mode`: switch `Absolute (€)` / `Percentage (%)` sullo stesso asse orizzontale del filtro frequenza.
+  - `Funds NAV Evolution Chart`: linee NAV per fondo dalla prima transazione del fondo.
+  - `Portfolio Market Value Evolution`: linea totale + linee per fondo con etichette ultimo valore.
+  - `Portfolio Composition`: stacked area % con switch `Market Value` / `Gross Contribution`.
+  - `Portfolio Market Value Evolution - Daily Holdings Value`: tabella delta giornaliero € per fondo + totale.
 - **Functions:**
   - `evolution_of_portfolio()`
+  - `_render_revenue_pnl_bar()`
+  - `_render_funds_nav_chart()`
+  - `_render_portfolio_market_value()`
+  - `_render_portfolio_composition()`
+  - `_render_market_value_table()`
 - **Calculations:**
-  - None
+  - Absolute period change (per fund): somma nel periodo di `qty_t * (price_t - price_(t-1))`.
+  - Percentage period change (per fund): `absolute_change_period / market_value_prev_period_end * 100`.
+  - Total percentage period change: `total_absolute_change_period / total_market_value_prev_period_end * 100`.
 
 ---
 
 
-## <a name="section-10"></a>10. Transaction History (Lines 1264–1598)
+## <a name="section-10"></a>10. Date-Axis Fit and Right Padding (`components/chart_helpers.py`)
+- **Purpose:** Uniforma la UX dei grafici con asse data per usare la larghezza disponibile e mantenere visibile l'etichetta dell'ultimo dato.
+- **Behavior:**
+  - range X esplicito con piccolo padding destro (circa 4% dello span, minimo 2 giorni)
+  - rangeslider vincolato al range dati reale (senza padding)
+  - applicato tramite `apply_standard_xaxis()` a overview/evolution/historical chart principali
+  - gestione esplicita anche nel grafico storico multi-subplot con assi custom
+
+---
+
+
+## <a name="section-11"></a>11. Transaction History (Lines 1264–1598)
 - **Purpose:** Displays and filters transaction history by fund and date.
 - **Variables:**
   - Filtered DataFrames for transactions.
@@ -196,7 +220,7 @@
 ---
 
 
-## <a name="section-11"></a>11. Active Funds (Lines 1599–1637)
+## <a name="section-12"></a>12. Active Funds (Lines 1599–1637)
 - **Purpose:** Displays a list of active funds.
 - **Variables:**
   - DataFrame of active funds.
@@ -208,7 +232,7 @@
 ---
 
 
-## <a name="section-12"></a>12. Historical Prices Charts (Lines 1638–2261)
+## <a name="section-13"></a>13. Historical Prices Charts (Lines 1638–2261)
 - **Purpose:** Visualizes historical price data with fund and date filters, and provides a data table.
 - **Variables:**
   - Filtered historical price DataFrames.
@@ -222,7 +246,7 @@
 ---
 
 
-## <a name="section-13"></a>13. Add Transactions and Funds (Lines 2262–2310)
+## <a name="section-14"></a>14. Add Transactions and Funds (Lines 2262–2310)
 - **Purpose:** Allows authenticated users to add new transactions and funds.
 - **Variables:**
   - Form state variables for new transactions and funds.
@@ -234,7 +258,7 @@
 ---
 
 
-## <a name="section-14"></a>14. Theme and Navigation Setup (Lines 2311–end)
+## <a name="section-15"></a>15. Theme and Navigation Setup (Lines 2311–end)
 - **Purpose:** Initializes theme state and sets up the navigation menu for the app.
 - **Variables:**
   - `st.session_state.theme_dark`: Boolean for dark mode.
@@ -260,7 +284,7 @@
 - **fmt_number(value)**: Formats a value as a number, with optional masking.
 - **mask_value(value, numeric)**: Returns a masked or real value based on state.
 - **overview_and_charts()**: Main dashboard; calculates and displays portfolio metrics, charts, and filters.
-- **evolution_of_portfolio()**: Placeholder for a future portfolio evolution page.
+- **evolution_of_portfolio()**: Renders all Evolution charts/tables, including Absolute/% period change by fund.
 - **transaction_history()**: Displays and filters transaction history.
 - **active_funds()**: Displays a list of active funds.
 - **historical_prices()**: Visualizes historical price data and provides a data table.

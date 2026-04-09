@@ -426,6 +426,11 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
     # causato da autorange che interpreta male annotazioni cross-subplot)
     x_min = plot_df["date"].min()
     x_max = plot_df["date"].max()
+    if x_max > x_min:
+        x_padding = max((x_max - x_min) * 0.04, pd.Timedelta(days=2))
+    else:
+        x_padding = pd.Timedelta(days=2)
+    x_max_display = x_max + x_padding
 
     # Rangeslider e rangeselector sull'ultimo asse X (in basso).
     # Il range del rangeslider è vincolato al filtro date della pagina
@@ -433,7 +438,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
     bottom_xaxis_key = f"xaxis{n_rows}" if n_rows > 1 else "xaxis"
     fig.update_layout(**{
         bottom_xaxis_key: dict(
-            range=[x_min, x_max],
+            range=[x_min, x_max_display],
             rangeslider=dict(visible=True, thickness=0.04, range=[x_min, x_max]),
             rangeselector=dict(buttons=RANGE_SELECTOR_BUTTONS),
             showspikes=True,
@@ -447,7 +452,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
     # Range esplicito anche sugli altri assi X (condivisi ma serve per autorange)
     for r in range(1, n_rows):
         xaxis_key = "xaxis" if r == 1 else f"xaxis{r}"
-        fig.update_layout(**{xaxis_key: dict(range=[x_min, x_max])})
+        fig.update_layout(**{xaxis_key: dict(range=[x_min, x_max_display])})
 
     # Stile titoli subplot (più piccoli, colore tenue).
     # IMPORTANTE: modificare SOLO le annotazioni-titolo dei subplot (xref="paper"),
