@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from config import FUND_COLORS
+from components.fund_filter import render_fund_filter
 from components.styling import hex_to_rgb
 from components.chart_helpers import (
     apply_standard_xaxis,
@@ -35,19 +36,25 @@ def evolution_of_portfolio(
     """
     st.header("📊 Evolution of Portfolio")
 
-    # Usa filtro fondi dallo stato sessione
-    if "fund_filter" not in st.session_state or len(st.session_state.fund_filter) == 0:
-        filter_funds = funds["Fund"].tolist() if len(funds) > 0 else []
-    else:
-        filter_funds = st.session_state.fund_filter
-
-    if len(transactions) == 0 or len(filter_funds) == 0:
-        st.info("No data available. Please add transactions and ensure at least one fund is selected.")
+    if len(transactions) == 0:
+        st.info("No data available. Please add transactions.")
         return
 
     hist_data = hist_data_global
     if len(hist_data) == 0 or "date" not in hist_data.columns:
         st.info("No historical data available for evolution calculations.")
+        return
+
+    # Filtro fondi esplicito anche in questa sezione
+    available_funds = [f for f in funds.get("Fund", pd.Series(dtype=str)).tolist() if f in hist_data.columns]
+    if not available_funds:
+        available_funds = [c for c in hist_data.columns if c != "date"]
+
+    filter_funds = render_fund_filter(available_funds, FUND_COLORS, key_suffix="_evolution")
+    filter_funds = [f for f in filter_funds if f in hist_data.columns]
+
+    if len(filter_funds) == 0:
+        st.info("Select at least one fund to view Evolution charts.")
         return
 
     # Prepara dati storici in ordine crescente
@@ -107,7 +114,7 @@ def evolution_of_portfolio(
 def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
     """Stacked bar chart: solo ritorno da movimento NAV (esclusi versamenti)."""
     st.subheader("📈 Absolute and % Change by Fund")
-    st.caption("Shows NAV-only change by fund (excludes new contributions), in absolute € or %")
+    st.caption("Shows NAV-only change (excludes new contributions) as absolute €, per-fund %, or total portfolio %")
 
     # Selettore frequenza
     freq_options = {
@@ -123,7 +130,7 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
     with controls_col_r:
         display_mode = st.segmented_control(
             "Display",
-            ["Absolute (€)", "Percentage (%)"],
+            ["Absolute (€)", "Funds (%)", "Portfolio (%)"],
             default="Absolute (€)",
             key="revenue_pnl_display_mode",
         )
@@ -192,44 +199,67 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
         .reindex(nav_abs_resampled.index)
     )
 
-    if display_mode == "Percentage (%)":
+    total_abs = nav_abs_resampled[filter_funds].sum(axis=1)
+    total_prev_mv = mv_resampled_last[filter_funds].sum(axis=1).shift(1)
+
+    if display_mode == "Funds (%)":
         prev_mv = mv_resampled_last[filter_funds].shift(1)
         nav_pct_resampled = nav_abs_resampled[filter_funds].div(prev_mv.where(prev_mv != 0)).mul(100)
-
-        total_abs = nav_abs_resampled[filter_funds].sum(axis=1)
-        total_prev_mv = mv_resampled_last[filter_funds].sum(axis=1).shift(1)
         nav_pct_resampled["Total"] = total_abs.div(total_prev_mv.where(total_prev_mv != 0)).mul(100)
 
         chart_df = nav_pct_resampled.reset_index()
         yaxis_title = f"{freq_label} Change (%)"
         hover_fmt = "%{y:,.2f}%"
         total_fmt = lambda v: "-" if pd.isna(v) else f"{v:,.2f}%"
+        portfolio_only_mode = False
+    elif display_mode == "Portfolio (%)":
+        portfolio_pct = total_abs.div(total_prev_mv.where(total_prev_mv != 0)).mul(100)
+        chart_df = pd.DataFrame({
+            "date": portfolio_pct.index,
+            "Portfolio": portfolio_pct.values,
+        }).reset_index(drop=True)
+        yaxis_title = f"{freq_label} Portfolio Change (%)"
+        portfolio_only_mode = True
     else:
         nav_abs_resampled["Total"] = nav_abs_resampled[filter_funds].sum(axis=1)
         chart_df = nav_abs_resampled.reset_index()
         yaxis_title = f"{freq_label} Change (€)"
         hover_fmt = "€%{y:,.2f}"
         total_fmt = lambda v: f"€{v:,.2f}"
+        portfolio_only_mode = False
 
     # Crea stacked bar chart
     fig = go.Figure()
-    for fund in filter_funds:
-        color = FUND_COLORS.get(fund, "#999999")
+    if portfolio_only_mode:
+        portfolio_colors = [
+            "#2fbf71" if pd.notna(v) and v > 0 else "#e15252" if pd.notna(v) and v < 0 else "#8f9bb3"
+            for v in chart_df["Portfolio"]
+        ]
         fig.add_trace(go.Bar(
-            x=chart_df["date"], y=chart_df[fund],
-            name=fund, marker=dict(color=color),
-            hovertemplate=f"<b>{fund}</b>: {hover_fmt}<extra></extra>",
+            x=chart_df["date"],
+            y=chart_df["Portfolio"],
+            name="Portfolio",
+            marker=dict(color=portfolio_colors),
+            hovertemplate="<b>Portfolio</b>: %{y:,.2f}%<extra></extra>",
+        ))
+    else:
+        for fund in filter_funds:
+            color = FUND_COLORS.get(fund, "#999999")
+            fig.add_trace(go.Bar(
+                x=chart_df["date"], y=chart_df[fund],
+                name=fund, marker=dict(color=color),
+                hovertemplate=f"<b>{fund}</b>: {hover_fmt}<extra></extra>",
+            ))
+
+        # Traccia invisibile per totale nel tooltip
+        fig.add_trace(go.Scatter(
+            x=chart_df["date"], y=[0] * len(chart_df),
+            mode="lines", line=dict(width=0), showlegend=False,
+            hovertemplate="<b>Total</b>: " + chart_df["Total"].apply(total_fmt) + "<extra></extra>",
         ))
 
-    # Traccia invisibile per totale nel tooltip
-    fig.add_trace(go.Scatter(
-        x=chart_df["date"], y=[0] * len(chart_df),
-        mode="lines", line=dict(width=0), showlegend=False,
-        hovertemplate="<b>Total</b>: " + chart_df["Total"].apply(total_fmt) + "<extra></extra>",
-    ))
-
     fig.update_layout(
-        barmode="relative",
+        barmode="group" if portfolio_only_mode else "relative",
         height=600, hovermode="x unified", xaxis_title="", yaxis_title=yaxis_title,
         template="plotly_white", showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -241,6 +271,8 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
         rangemode="normal", fixedrange=False, showspikes=True, spikemode="across",
         zeroline=True, zerolinecolor="rgba(150,150,150,0.5)", zerolinewidth=2,
     )
+    if portfolio_only_mode:
+        fig.update_yaxes(tickformat=".1f")
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("absolute_pct_change_by_fund"))
 
 
@@ -445,7 +477,7 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
         template="plotly_white", showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         dragmode="pan", uirevision="portfolio_mv_evolution",
-        newshape=dict(line_color="#888888"), margin=dict(r=100),
+        newshape=dict(line_color="#888888"), margin=dict(r=36),
         yaxis=dict(range=[min_mv - padding, max_mv + padding]),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)

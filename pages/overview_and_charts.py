@@ -638,7 +638,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
         height=520, hovermode="x unified", xaxis_title="", yaxis_title="Value (€)",
         template="plotly_white", showlegend=False, dragmode="pan",
         uirevision="overview_evolution", newshape=dict(line_color="#888888"),
-        margin=dict(r=80),
+        margin=dict(r=36),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
     fig.update_yaxes(autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")

@@ -28,6 +28,28 @@ from components.chart_helpers import (
 )
 
 
+def _get_timeframe_start_end(timeframe: str, min_d: date, max_d: date, all_start_d: date) -> tuple[date, date]:
+    """Restituisce start/end in base a un timeframe predefinito."""
+    max_ts = pd.to_datetime(max_d)
+    min_ts = pd.to_datetime(min_d)
+
+    if timeframe == "1M":
+        start_ts = max_ts - pd.DateOffset(months=1)
+    elif timeframe == "3M":
+        start_ts = max_ts - pd.DateOffset(months=3)
+    elif timeframe == "6M":
+        start_ts = max_ts - pd.DateOffset(months=6)
+    elif timeframe == "YTD":
+        start_ts = pd.Timestamp(year=max_ts.year, month=1, day=1)
+    elif timeframe == "1Y":
+        start_ts = max_ts - pd.DateOffset(years=1)
+    else:  # All
+        start_ts = pd.to_datetime(all_start_d)
+
+    start_ts = max(start_ts, min_ts)
+    return start_ts.date(), max_d
+
+
 def historical_prices(
     funds: pd.DataFrame,
     transactions: pd.DataFrame,
@@ -111,24 +133,61 @@ def historical_prices(
     min_d = hist_df_display["date"].min().date()
     max_d = hist_df_display["date"].max().date()
 
-    default_start = date(2024, 10, 1)
-    if min_d > default_start:
-        default_start = min_d
+    tx_dates = pd.to_datetime(transactions.get("Date"), errors="coerce") if "Date" in transactions.columns else pd.Series(dtype="datetime64[ns]")
+    first_tx_date = tx_dates.dropna().min().date() if len(tx_dates.dropna()) > 0 else min_d
+    default_start = max(first_tx_date, min_d)
 
-    # ----- Filtro date + toggle vista -----
-    col1, col2, col3 = st.columns([2, 2, 1.5])
+    # ----- Filtro timeframe + date + toggle vista -----
+    if "hist_timeframe_applied" not in st.session_state:
+        st.session_state.hist_timeframe_applied = None
+
+    col0, col1, col2, col3 = st.columns([2.2, 2, 2, 1.4])
+    with col0:
+        timeframe = st.segmented_control(
+            "Time-frame",
+            ["1M", "3M", "6M", "YTD", "1Y", "All"],
+            default="All",
+            key="hist_timeframe",
+        )
+        if timeframe is None:
+            timeframe = "All"
+
+        if timeframe != st.session_state.hist_timeframe_applied:
+            tf_start, tf_end = _get_timeframe_start_end(timeframe, min_d, max_d, default_start)
+            st.session_state.hist_start_date = tf_start
+            st.session_state.hist_end_date = tf_end
+            st.session_state.hist_timeframe_applied = timeframe
+
     with col1:
-        start_d = st.date_input("Start", value=default_start, min_value=min_d, key="hist_start_date")
+        start_d = st.date_input(
+            "Start",
+            value=st.session_state.get("hist_start_date", default_start),
+            min_value=min_d,
+            max_value=max_d,
+            key="hist_start_date",
+        )
     with col2:
-        end_d = st.date_input("End", value=max_d, min_value=min_d, key="hist_end_date")
+        end_d = st.date_input(
+            "End",
+            value=st.session_state.get("hist_end_date", max_d),
+            min_value=min_d,
+            max_value=max_d,
+            key="hist_end_date",
+        )
+
+    if start_d > end_d:
+        start_d, end_d = end_d, start_d
+        st.session_state.hist_start_date = start_d
+        st.session_state.hist_end_date = end_d
+
     with col3:
         st.markdown("")
         view_mode = st.segmented_control(
-            "View:", ["Combined", "Grid"],
-            default="Combined" if st.session_state.hist_view_mode == "combined" else "Grid",
+            "View", ["Grid", "Combined"],
+            default="Grid" if st.session_state.hist_view_mode == "grid" else "Combined",
             key="hist_view_segmented",
         )
-        st.session_state.hist_view_mode = "combined" if view_mode == "Combined" or view_mode is None else "grid"
+        st.session_state.hist_view_mode = "combined" if view_mode == "Combined" else "grid"
 
     plot_df = hist_df_display[
         (hist_df_display["date"] >= pd.to_datetime(start_d))
@@ -237,8 +296,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             y=last_pct,
             text=f"{last_pct:+.2f}%",
             showarrow=False,
-            xanchor="left",
-            xshift=6,
+            xanchor="right",
+            xshift=-4,
             font=dict(size=11, color=color),
             bordercolor=color,
             borderwidth=1.5,
@@ -354,8 +413,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             y=latest_price,
             text=f"€{latest_price:,.2f}",
             showarrow=False,
-            xanchor="left",
-            xshift=6,
+            xanchor="right",
+            xshift=-4,
             font=dict(size=11, color=color),
             bordercolor=color,
             borderwidth=1.5,
@@ -378,7 +437,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         dragmode="pan",
         uirevision="hist_combined_stacked",
         newshape=dict(line_color="#888888"),
-        margin=dict(r=80, t=30, b=10, l=50),
+        margin=dict(r=36, t=30, b=10, l=50),
     )
 
     # Asse Y primo pannello (senza titolo)
@@ -427,7 +486,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
     x_min = plot_df["date"].min()
     x_max = plot_df["date"].max()
     if x_max > x_min:
-        x_padding = max((x_max - x_min) * 0.04, pd.Timedelta(days=2))
+        x_padding = max((x_max - x_min) * 0.02, pd.Timedelta(days=2))
     else:
         x_padding = pd.Timedelta(days=2)
     x_max_display = x_max + x_padding
@@ -545,7 +604,7 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
 
     fig.update_layout(
         height=320, hovermode="x unified", template="plotly_white", showlegend=False,
-        margin=dict(t=40, b=30, l=10, r=100), dragmode="pan",
+        margin=dict(t=40, b=30, l=10, r=36), dragmode="pan",
         uirevision="hist_grid_sync", newshape=dict(line_color="#888888"),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS)

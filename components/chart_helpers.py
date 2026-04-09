@@ -9,6 +9,10 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
+DATE_AXIS_RIGHT_PADDING_RATIO = 0.02
+DATE_AXIS_RIGHT_PADDING_MIN = pd.Timedelta(days=2)
+
+
 # ---------------------------------------------------------------------------
 # Range selector standard (bottoni 1M, 3M, 6M, YTD, 1Y, 3Y, All)
 # ---------------------------------------------------------------------------
@@ -53,6 +57,18 @@ def get_plotly_config(filename: str = "chart") -> dict:
         scrollZoom=True,
         displaylogo=False,
         doubleClick="reset",
+        editable=True,
+        edits=dict(
+            annotationPosition=True,
+            annotationTail=False,
+            axisTitleText=False,
+            colorbarPosition=False,
+            colorbarTitleText=False,
+            legendPosition=False,
+            legendText=False,
+            shapePosition=False,
+            titleText=False,
+        ),
         modeBarButtonsToAdd=[
             "drawline",
             "eraseshape",
@@ -114,9 +130,12 @@ def apply_standard_xaxis(fig: go.Figure, buttons: list | None = None) -> None:
             x_min = x_dt.min()
             x_max = x_dt.max()
             if x_max > x_min:
-                right_padding = max((x_max - x_min) * 0.04, pd.Timedelta(days=2))
+                right_padding = max(
+                    (x_max - x_min) * DATE_AXIS_RIGHT_PADDING_RATIO,
+                    DATE_AXIS_RIGHT_PADDING_MIN,
+                )
             else:
-                right_padding = pd.Timedelta(days=2)
+                right_padding = DATE_AXIS_RIGHT_PADDING_MIN
 
             xaxis_cfg["autorange"] = False
             xaxis_cfg["range"] = [x_min, x_max + right_padding]
@@ -210,8 +229,8 @@ def add_price_annotation(
         y=y,
         text=text,
         showarrow=False,
-        xanchor="left",
-        xshift=10,
+        xanchor="right",
+        xshift=-4,
         font=dict(size=font_size, color=color),
         bordercolor=color,
         borderwidth=1.5,
