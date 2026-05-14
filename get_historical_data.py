@@ -12,6 +12,32 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 # Directory root del progetto (dove si trova questo script)
 _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+def normalize_date_to_rome_day(date_series):
+    dt = pd.to_datetime(date_series, errors="coerce")
+    if dt.dt.tz is None:
+        dt = dt.dt.tz_localize("Europe/Rome")
+    else:
+        dt = dt.dt.tz_convert("Europe/Rome")
+    return dt.dt.tz_localize(None).dt.normalize()
+
+
+def prepare_fund_history(df, value_col, source_name):
+    df = df.copy()
+    df["Date"] = normalize_date_to_rome_day(df["Date"])
+    invalid_dates = df["Date"].isna().sum()
+    if invalid_dates:
+        print(f"⚠ {source_name}: dropping {invalid_dates} rows with invalid dates")
+    df = df.dropna(subset=["Date"])
+
+    duplicate_dates = int(df["Date"].duplicated().sum())
+    if duplicate_dates:
+        print(f"⚠ {source_name}: dropping {duplicate_dates} duplicate Date rows (keeping last)")
+        df = df.sort_values("Date").drop_duplicates(subset=["Date"], keep="last")
+
+    df[value_col] = pd.to_numeric(df[value_col], errors="coerce").round(2)
+    return df[["Date", value_col]].sort_values("Date").reset_index(drop=True)
+
 # Load funds configuration from data/ directory (percorso assoluto)
 funds = pd.read_csv(os.path.join(_ROOT_DIR, "data", "funds.csv"))
 print(f"DEBUG: Funds loaded: {funds['Fund'].tolist()}")
@@ -44,12 +70,7 @@ for ticker, pair_id in pair_ids.items():
         # Keep only date and close price
         hist = hist.rename(columns={"date": "Date", "price": fund_name})[["Date", fund_name]]
 
-        # Convert Date to Europe/Rome tz-naive
-        dt = pd.to_datetime(hist["Date"], errors="coerce")
-        dt = dt.dt.tz_localize("Europe/Rome").dt.tz_localize(None)
-        hist["Date"] = dt
-
-        hist[fund_name] = pd.to_numeric(hist[fund_name], errors="coerce").round(2)
+        hist = prepare_fund_history(hist, fund_name, fund_name)
         dfs.append(hist)
         print(f"✓ {fund_name}: {len(hist)} rows")
     except Exception as e:
@@ -92,12 +113,9 @@ try:
     df = df.dropna()
     
     # Convert Date and NAV
-    df['Date'] = pd.to_datetime(df['Date'], format='%d.%m.%Y')
-    df['Me A Ee'] = pd.to_numeric(df['Me A Ee'], errors='coerce').round(2)
-    
-    # Convert to Europe/Rome timezone
-    df['Date'] = df['Date'].dt.tz_localize('Europe/Rome').dt.tz_localize(None)
-    
+    df['Date'] = pd.to_datetime(df['Date'], format='%d.%m.%Y', errors='coerce')
+    df = prepare_fund_history(df, 'Me A Ee', 'Me A Ee')
+
     dfs.append(df)
     print(f"✓ Me A Ee: {len(df)} rows")
 except Exception as e:
@@ -113,26 +131,42 @@ if dfs:
         merged_table = pd.merge(merged_table, df, on="Date", how="outer")
     
     merged_table = merged_table.sort_values("Date", ascending=True).reset_index(drop=True)
+    merged_duplicate_dates = int(merged_table["Date"].duplicated().sum())
+    if merged_duplicate_dates:
+        print(f"⚠ Merge produced {merged_duplicate_dates} duplicate Date rows; collapsing by last non-null value")
+        fund_columns = [col for col in merged_table.columns if col != "Date"]
+        aggregations = {
+            col: (lambda s: s.dropna().iloc[-1] if s.notna().any() else np.nan)
+            for col in fund_columns
+        }
+        merged_table = (
+            merged_table.sort_values("Date")
+            .groupby("Date", as_index=False)
+            .agg(aggregations)
+            .sort_values("Date", ascending=True)
+            .reset_index(drop=True)
+        )
 
     fund_columns = [col for col in merged_table.columns if col != "Date"]
     for fund_column in fund_columns:
-        merged_table[fund_column] = merged_table[fund_column].astype(float)
-        series = merged_table[fund_column]
+        series = pd.to_numeric(merged_table[fund_column], errors="coerce")
         first_valid_idx = series.first_valid_index()
         if first_valid_idx is None:
             # All NaN for this fund
+            merged_table[fund_column] = series
             continue
         # Fill before first valid with NaN
-        merged_table.loc[:first_valid_idx - 1, fund_column] = np.nan
-        # Manual forward fill to avoid warnings
-        filled_values = merged_table[fund_column].values.copy()
-        last_valid = np.nan
-        for i in range(len(filled_values)):
-            if np.isnan(filled_values[i]):
-                filled_values[i] = last_valid
-            else:
-                last_valid = filled_values[i]
-        merged_table[fund_column] = filled_values
+        series.loc[:first_valid_idx - 1] = np.nan
+        orig_non_na = series.notna()
+        merged_table[fund_column] = series.ffill()
+        changed_real_values = orig_non_na & (~np.isclose(merged_table[fund_column], series, equal_nan=True))
+        if changed_real_values.any():
+            print(
+                f"⚠ {fund_column}: detected {int(changed_real_values.sum())} unexpected changes on originally non-null rows"
+            )
+        filled_count = int((~orig_non_na & merged_table[fund_column].notna()).sum())
+        if filled_count:
+            print(f"DEBUG: {fund_column}: forward-filled {filled_count} rows")
 
     merged_table = merged_table.sort_values("Date", ascending=False).reset_index(drop=True)
 
