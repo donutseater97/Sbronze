@@ -14,6 +14,7 @@ _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def normalize_date_to_rome_day(date_series):
+    """Parse datetimes, convert to Europe/Rome, drop timezone/time, keep calendar day."""
     dt = pd.to_datetime(date_series, errors="coerce")
     if dt.dt.tz is None:
         dt = dt.dt.tz_localize("Europe/Rome")
@@ -23,6 +24,7 @@ def normalize_date_to_rome_day(date_series):
 
 
 def prepare_fund_history(df, value_col, source_name):
+    """Normalize Date and numeric value column, logging invalid/duplicate-date diagnostics."""
     df = df.copy()
     df["Date"] = normalize_date_to_rome_day(df["Date"])
     invalid_dates = df["Date"].isna().sum()
@@ -37,6 +39,12 @@ def prepare_fund_history(df, value_col, source_name):
 
     df[value_col] = pd.to_numeric(df[value_col], errors="coerce").round(2)
     return df[["Date", value_col]].sort_values("Date").reset_index(drop=True)
+
+
+def last_non_null(series):
+    """Return last non-null value in a series, otherwise NaN."""
+    non_null_values = series.dropna()
+    return non_null_values.iloc[-1] if not non_null_values.empty else np.nan
 
 # Load funds configuration from data/ directory (percorso assoluto)
 funds = pd.read_csv(os.path.join(_ROOT_DIR, "data", "funds.csv"))
@@ -135,10 +143,7 @@ if dfs:
     if merged_duplicate_dates:
         print(f"⚠ Merge produced {merged_duplicate_dates} duplicate Date rows; collapsing by last non-null value")
         fund_columns = [col for col in merged_table.columns if col != "Date"]
-        aggregations = {
-            col: (lambda s: s.dropna().iloc[-1] if s.notna().any() else np.nan)
-            for col in fund_columns
-        }
+        aggregations = {col: last_non_null for col in fund_columns}
         merged_table = (
             merged_table.sort_values("Date")
             .groupby("Date", as_index=False)
@@ -157,9 +162,10 @@ if dfs:
             continue
         # Fill before first valid with NaN
         series.loc[:first_valid_idx - 1] = np.nan
-        orig_non_na = series.notna()
+        series_before_fill = series.copy()
+        orig_non_na = series_before_fill.notna()
         merged_table[fund_column] = series.ffill()
-        changed_real_values = orig_non_na & (~np.isclose(merged_table[fund_column], series, equal_nan=True))
+        changed_real_values = orig_non_na & merged_table[fund_column].ne(series_before_fill)
         if changed_real_values.any():
             print(
                 f"⚠ {fund_column}: detected {int(changed_real_values.sum())} unexpected changes on originally non-null rows"
