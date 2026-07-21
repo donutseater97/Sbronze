@@ -22,8 +22,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.ACTIONS_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
-          ref: main
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,6 +37,10 @@ jobs:
         run: |
           git reset --hard HEAD
           git clean -fd
+
+      - name: Pull latest changes
+        run: |
+          git pull --rebase origin main
 
       - name: Generate historical data CSV
         run: |
