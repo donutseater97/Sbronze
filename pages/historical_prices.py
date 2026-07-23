@@ -109,9 +109,26 @@ def historical_prices(
             for _, r in src_df.iterrows():
                 sources_map[r.get("Fund")] = {"source": r.get("Source", ""), "last_date": r.get("LastDate", "")}
             # Build a compact summary and show it immediately below the success message
-            summary_items = [f"{f}: {info.get('source','Unknown')} ({info.get('last_date','')})" for f, info in sources_map.items()]
+            # Build summary ordered as in funds.csv (preserve user-configured order)
+            def _pretty_source(src: str) -> str:
+                if not src:
+                    return "Unknown"
+                if "JPMorgan" in src or "JP Morgan" in src:
+                    return "JP Morgan"
+                return src
+
+            funds_order = funds["Fund"].tolist() if "Fund" in funds.columns else list(sources_map.keys())
+            summary_items = []
+            for f in funds_order:
+                if f in sources_map:
+                    info = sources_map[f]
+                    pretty = _pretty_source(info.get("source", ""))
+                    last = info.get("last_date", "")
+                    summary_items.append(f"{f}: {pretty} ({last})")
+
             if summary_items:
-                st.caption("Sources: " + " • ".join(summary_items))
+                # Use newline-separated caption so items wrap vertically in the UI
+                st.caption("\n".join(summary_items))
         except Exception:
             st.warning("Could not read historical_sources.csv metadata")
 
