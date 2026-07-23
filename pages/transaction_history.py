@@ -186,13 +186,7 @@ def transaction_history(
     # Keep original order for other_cols, then append PL columns
     display_df = display_df[other_cols + [c for c in pl_cols if c in display_df.columns]]
 
-    # Optional debug view: show raw P/L helper columns to verify calculations
-    try:
-        if st.checkbox("Show P/L debug values", key="show_pl_debug"):
-            debug_cols = [c for c in ["Date", "Fund", "Price (€)", "Quantity", "Transaction P/L (%)", "Transaction P/L (€)", "_tx_pl_pct_raw", "_tx_pl_eur_raw"] if c in display_df.columns]
-            st.dataframe(display_df[debug_cols], use_container_width=True)
-    except Exception:
-        pass
+    # (debug view removed)
 
     # ----- Stile tabella -----
     def style_fund_rows(row):
