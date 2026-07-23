@@ -109,6 +109,43 @@ def transaction_history(
     display_df["_delta_qty_raw"] = trans_df["Δ Quantity"].values
     display_df["_delta_net_inv_disp"] = display_df["_delta_net_inv_raw"].apply(format_delta_net_inv)
 
+    # ----- Transaction P/L columns (based on latest available price) -----
+    display_df["Transaction P/L (%)"] = pd.NA
+    display_df["Transaction P/L (€)"] = pd.NA
+    display_df["_tx_pl_pct_raw"] = pd.NA
+    display_df["_tx_pl_eur_raw"] = pd.NA
+    try:
+        if len(hist_data_global) > 0 and "date" in hist_data_global.columns:
+            latest_date = pd.to_datetime(hist_data_global["date"]).max()
+            last_row = hist_data_global[pd.to_datetime(hist_data_global["date"]) == latest_date]
+            if len(last_row) > 0:
+                last_row = last_row.iloc[0]
+                # Build map fund->last price
+                last_prices = {c: last_row[c] for c in last_row.index if c != "date"}
+                for idx, orig_row in trans_df.reset_index().iterrows():
+                    fund = orig_row.get("Fund")
+                    qty = orig_row.get("Quantity")
+                    price_tx = orig_row.get("Price (€)")
+                    last_price = last_prices.get(fund, None)
+                    try:
+                        if pd.notna(last_price) and pd.notna(price_tx) and price_tx != 0 and pd.notna(qty):
+                            pl_eur = (last_price * qty) - (price_tx * qty)
+                            pl_pct = (last_price / price_tx - 1.0) * 100.0
+                        else:
+                            pl_eur = pd.NA
+                            pl_pct = pd.NA
+                    except Exception:
+                        pl_eur = pd.NA
+                        pl_pct = pd.NA
+                    # assign into display_df row-wise (aligned by reset index)
+                    if idx < len(display_df):
+                        display_df.at[idx, "_tx_pl_pct_raw"] = pl_pct
+                        display_df.at[idx, "_tx_pl_eur_raw"] = pl_eur
+                        display_df.at[idx, "Transaction P/L (%)"] = pl_pct
+                        display_df.at[idx, "Transaction P/L (€)"] = pl_eur
+    except Exception:
+        pass
+
     def _format_delta_qty_row(row):
         dq = row["_delta_qty_raw"]
         if pd.isna(dq):
@@ -143,6 +180,12 @@ def transaction_history(
     display_df = display_df.drop(columns=["Net Invested", "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity"])
     display_df["_fund_type"] = trans_df["Fund"].values
 
+    # Ensure Transaction P/L columns are at the end of the table
+    pl_cols = ["Transaction P/L (%)", "Transaction P/L (€)"]
+    other_cols = [c for c in display_df.columns if c not in pl_cols]
+    # Keep original order for other_cols, then append PL columns
+    display_df = display_df[other_cols + [c for c in pl_cols if c in display_df.columns]]
+
     # ----- Stile tabella -----
     def style_fund_rows(row):
         """Colora Fund col, Net Invested delta e Quantity delta."""
@@ -171,6 +214,22 @@ def transaction_history(
                     styles.append(f"background-color: {green}")
                 else:
                     styles.append(f"background-color: {red}")
+            elif col == "Transaction P/L (%)":
+                dv = row.get("_tx_pl_pct_raw", None)
+                if pd.isna(dv) or dv is None:
+                    styles.append("")
+                elif dv > 0:
+                    styles.append(f"background-color: {green}")
+                else:
+                    styles.append(f"background-color: {red}")
+            elif col == "Transaction P/L (€)":
+                dv = row.get("_tx_pl_eur_raw", None)
+                if pd.isna(dv) or dv is None:
+                    styles.append("")
+                elif dv > 0:
+                    styles.append(f"background-color: {green}")
+                else:
+                    styles.append(f"background-color: {red}")
             else:
                 styles.append("")
         return styles
@@ -181,8 +240,11 @@ def transaction_history(
         "Price (€)": st.column_config.NumberColumn(format="€%.2f"),
         "Fees (€)": st.column_config.NumberColumn(format="€%.2f"),
         "Gross Contribution": st.column_config.NumberColumn(format="€%.2f"),
+        "Transaction P/L (€)": st.column_config.NumberColumn(format="€%.2f"),
+        "Transaction P/L (%)": st.column_config.NumberColumn(format="%.2f%%"),
         "_delta_net_inv_raw": None, "_delta_qty_raw": None,
         "_delta_net_inv_disp": None, "_delta_qty_disp": None, "_fund_type": None,
+        "_tx_pl_pct_raw": None, "_tx_pl_eur_raw": None,
     })
 
     # CSS per testo piccolo nelle metriche
