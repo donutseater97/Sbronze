@@ -117,32 +117,32 @@ def transaction_history(
     try:
         if len(hist_data_global) > 0 and "date" in hist_data_global.columns:
             latest_date = pd.to_datetime(hist_data_global["date"]).max()
-            last_row = hist_data_global[pd.to_datetime(hist_data_global["date"]) == latest_date]
-            if len(last_row) > 0:
-                last_row = last_row.iloc[0]
+            last_row_df = hist_data_global[pd.to_datetime(hist_data_global["date"]) == latest_date]
+            if len(last_row_df) > 0:
+                last_row = last_row_df.iloc[0]
                 # Build map fund->last price
                 last_prices = {c: last_row[c] for c in last_row.index if c != "date"}
-                for idx, orig_row in trans_df.reset_index().iterrows():
-                    fund = orig_row.get("Fund")
-                    qty = orig_row.get("Quantity")
-                    price_tx = orig_row.get("Price (€)")
+
+                pct_list = []
+                eur_list = []
+                for _, drow in display_df.iterrows():
+                    fund = drow.get("Fund")
+                    price_tx = drow.get("Price (€)")
+                    qty = drow.get("Quantity")
                     last_price = last_prices.get(fund, None)
-                    try:
-                        if pd.notna(last_price) and pd.notna(price_tx) and price_tx != 0 and pd.notna(qty):
-                            pl_eur = (last_price * qty) - (price_tx * qty)
-                            pl_pct = (last_price / price_tx - 1.0) * 100.0
-                        else:
-                            pl_eur = pd.NA
-                            pl_pct = pd.NA
-                    except Exception:
+                    if pd.notna(last_price) and pd.notna(price_tx) and price_tx != 0 and pd.notna(qty):
+                        pl_eur = (last_price - price_tx) * qty
+                        pl_pct = (last_price / price_tx - 1.0) * 100.0
+                    else:
                         pl_eur = pd.NA
                         pl_pct = pd.NA
-                    # assign into display_df row-wise (aligned by reset index)
-                    if idx < len(display_df):
-                        display_df.at[idx, "_tx_pl_pct_raw"] = pl_pct
-                        display_df.at[idx, "_tx_pl_eur_raw"] = pl_eur
-                        display_df.at[idx, "Transaction P/L (%)"] = pl_pct
-                        display_df.at[idx, "Transaction P/L (€)"] = pl_eur
+                    pct_list.append(pl_pct)
+                    eur_list.append(pl_eur)
+
+                display_df["_tx_pl_pct_raw"] = pct_list
+                display_df["_tx_pl_eur_raw"] = eur_list
+                display_df["Transaction P/L (%)"] = display_df["_tx_pl_pct_raw"]
+                display_df["Transaction P/L (€)"] = display_df["_tx_pl_eur_raw"]
     except Exception:
         pass
 
