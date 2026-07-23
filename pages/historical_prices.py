@@ -100,6 +100,21 @@ def historical_prices(
     # ----- Dati caricati con successo -----
     st.success(f"✅ Loaded {len(hist_df)} price records for {len(hist_df.columns)-1} funds")
 
+    # ----- Carica metadata delle sorgenti (se presente) e mostra solo qui -----
+    sources_path = os.path.join(os.path.dirname(HISTORICAL_FILE), "historical_sources.csv")
+    sources_map: dict = {}
+    if os.path.exists(sources_path):
+        try:
+            src_df = pd.read_csv(sources_path)
+            for _, r in src_df.iterrows():
+                sources_map[r.get("Fund")] = {"source": r.get("Source", ""), "last_date": r.get("LastDate", "")}
+            # Build a compact summary and show it immediately below the success message
+            summary_items = [f"{f}: {info.get('source','Unknown')} ({info.get('last_date','')})" for f, info in sources_map.items()]
+            if summary_items:
+                st.caption("Sources: " + " • ".join(summary_items))
+        except Exception:
+            st.warning("Could not read historical_sources.csv metadata")
+
     # Banner "last updated"
     try:
         max_date = pd.to_datetime(hist_df.get("date"), errors="coerce").max()
@@ -122,6 +137,8 @@ def historical_prices(
     fund_cols = [c for c in hist_df.columns if c in funds_fresh["Fund"].tolist()]
     hist_df_display = hist_df[["date"] + fund_cols].copy()
     hist_df_display["date"] = pd.to_datetime(hist_df_display["date"])
+
+    
 
     # ----- Filtro fondi -----
     if "hist_view_mode" not in st.session_state:
@@ -216,9 +233,9 @@ def historical_prices(
 
     # ===== RENDERING GRAFICO =====
     if st.session_state.hist_view_mode == "combined":
-        _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d)
+           _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map)
     else:
-        _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d)
+           _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map)
 
     # ===== LEGENDA =====
     _render_unified_legend(selected_funds)
@@ -231,7 +248,7 @@ def historical_prices(
 # SOTTO-FUNZIONI (private)
 # =============================================================================
 
-def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d):
+def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map=None):
     """Vista combinata: pannello % return normalizzato in alto + grafici NAV individuali sotto.
 
     Layout a subplots con x-axis condiviso (zoom/pan temporale sincronizzato).
@@ -524,8 +541,10 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
 
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("historical_combined"))
 
+    
 
-def _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d):
+
+def _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map=None):
     """Vista griglia: un grafico per fondo, max 3 per riga."""
     cols_per_row = 2 if len(selected_funds) > 6 else min(3, len(selected_funds))
 
@@ -543,10 +562,10 @@ def _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, st
         cols = st.columns(len(row_funds))
         for col_slot, fund in zip(cols, row_funds):
             with col_slot:
-                _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df)
+                _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df, sources_map)
 
 
-def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
+def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df, sources_map=None):
     """Renderizza il grafico di un singolo fondo (vista griglia)."""
     fund_df = plot_df[["date", fund]].dropna().sort_values("date")
     if len(fund_df) == 0:
@@ -619,6 +638,8 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
     fig.update_yaxes(**yaxis_cfg)
 
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config(f"historical_{fund}"))
+
+    
 
 
 def _render_unified_legend(selected_funds):
