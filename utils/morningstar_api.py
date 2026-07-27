@@ -67,12 +67,32 @@ BOND_STYLEBOX_COLS = ["Ltd", "Mod", "Ext"]           # sensibilità ai tassi
 # -----------------------------------------------------------------------------
 # Fetch e parsing per singolo fondo
 # -----------------------------------------------------------------------------
-
 def fetch_security_details_xml(msid: str, timeout: int = 30) -> str:
-    """Scarica l'XML security_details per un Morningstar ID (es. 0P00015OFP)."""
-    resp = requests.get(_BASE_URL.format(msid=msid), headers=_HEADERS, timeout=timeout)
+    url = _BASE_URL.format(msid=msid)
+
+    resp = requests.get(
+        url,
+        headers=_HEADERS,
+        timeout=timeout,
+        allow_redirects=True,
+    )
+
     resp.raise_for_status()
-    return resp.text
+
+    text = resp.text.strip()
+
+    # Debug information
+    if not text:
+        raise RuntimeError(f"Morningstar returned an empty response for {msid}")
+
+    if text.startswith("<"):
+        return text
+
+    raise RuntimeError(
+        f"Unexpected response for {msid}\n"
+        f"Content-Type: {resp.headers.get('Content-Type')}\n\n"
+        f"{text[:500]}"
+    )
 
 
 def parse_fund_analytics(xml_text: str) -> dict:

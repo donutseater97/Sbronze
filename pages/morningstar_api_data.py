@@ -96,13 +96,13 @@ def morningstar_api_data(funds: pd.DataFrame, transactions: pd.DataFrame,
                 continue
             try:
                 per_fund[fund] = _load_fund_analytics(msid)
-            except Exception:
-                failed.append(fund)
+            except Exception as e:
+                failed.append(f"{fund}: {e}")
     if failed:
         st.warning(f"Dati Morningstar non disponibili per: {', '.join(failed)}. "
                    "Aggregazione calcolata sui fondi restanti.")
     if not per_fund:
-        st.error("Nessun dato Morningstar disponibile.")
+        st.error("\n".join(failed))
         return
 
     active_weights = {f: w for f, w in weights.items() if f in per_fund}
