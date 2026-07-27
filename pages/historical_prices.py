@@ -283,7 +283,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                 mode="lines",
                 name=fund,
                 line=dict(color=color, width=2),
-                hovertemplate=f"<b>{fund}</b>: %{{y:+.2f}}%<extra></extra>",
+                hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
+                               else f"<b>{fund}</b>: %{{y:+.2f}}%<extra></extra>"),
                 showlegend=False,
             ),
             row=1,
@@ -344,7 +345,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                 mode="lines",
                 name=fund,
                 line=dict(color=color, width=2),
-                hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
+                hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
+                               else f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>"),
                 showlegend=False,
             ),
             row=row,
@@ -360,7 +362,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                     mode="lines",
                     name=f"{fund} Avg NAV",
                     line=dict(color=color, dash="dash", width=1.5),
-                    hovertemplate=f"<b>{fund} Avg NAV</b>: €%{{y:,.2f}}<extra></extra>",
+                    hovertemplate=(f"<b>{fund} Avg NAV</b><extra></extra>" if privacy_on()
+                                   else f"<b>{fund} Avg NAV</b>: €%{{y:,.2f}}<extra></extra>"),
                     showlegend=False,
                 ),
                 row=row,
@@ -397,7 +400,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                         symbol="circle",
                         line=dict(width=2, color="white"),
                     ),
-                    hovertemplate="%{text}<extra></extra>",
+                    hovertemplate=("<b>Transazione</b><extra></extra>" if privacy_on()
+                                   else "%{text}<extra></extra>"),
                     text=hover_texts,
                     showlegend=False,
                 ),
@@ -564,7 +568,8 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
         x=fund_df["date"], y=fund_df[fund],
         mode="lines", name=fund,
         line=dict(color=color, width=2),
-        hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
+        hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
+                       else f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>"),
         showlegend=False,
     ))
 
@@ -575,7 +580,8 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
             y=[avg_nav_by_fund[fund], avg_nav_by_fund[fund]],
             mode="lines", name=f"{fund} Avg NAV",
             line=dict(color=color, dash="dash", width=1.5),
-            hovertemplate=f"<b>{fund} Avg NAV</b>: €%{{y:,.2f}}<extra></extra>",
+            hovertemplate=(f"<b>{fund} Avg NAV</b><extra></extra>" if privacy_on()
+                           else f"<b>{fund} Avg NAV</b>: €%{{y:,.2f}}<extra></extra>"),
             showlegend=False,
         ))
 
@@ -600,7 +606,8 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
         fig.add_trace(go.Scatter(
             x=trans_dates, y=trans_prices, mode="markers", name=f"{fund} Transactions",
             marker=dict(size=10, color=color, symbol="circle", line=dict(width=2, color="white")),
-            hovertemplate="%{text}<extra></extra>", text=hover_texts, showlegend=False,
+            hovertemplate=("<b>Transazione</b><extra></extra>" if privacy_on()
+                           else "%{text}<extra></extra>"), text=hover_texts, showlegend=False,
         ))
 
     y_min, y_max = calculate_y_range_with_padding(fig.data)

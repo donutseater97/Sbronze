@@ -8,7 +8,7 @@ Mostra la cronologia completa delle transazioni con:
 """
 
 import streamlit as st
-from utils.privacy import privacy_on, fmt_eur, MASK
+from utils.privacy import privacy_on, fmt_eur, MASK, MASK_PLAIN
 import pandas as pd
 
 from config import FUND_COLORS
@@ -176,11 +176,14 @@ def transaction_history(
                 styles.append("")
         return styles
 
-    # Privacy: oscura le colonne € personali (il Price resta: è il NAV pubblico)
+    # Privacy: oscura tutte le colonne valore tranne il Price (NAV pubblico)
     if privacy_on():
         for _col in ["Fees (€)", "Gross Contribution", "Net Invested (Δ vs Exp)"]:
             if _col in display_df.columns:
                 display_df[_col] = MASK
+        for _col in ["Quantity", "Quantity (theor) (Δ vs Q real)"]:
+            if _col in display_df.columns:
+                display_df[_col] = MASK_PLAIN
 
     styled_df = display_df.style.apply(style_fund_rows, axis=1)
 
@@ -241,14 +244,14 @@ def transaction_history(
     with r1c2:
         st.metric("Total Net Invested", fmt_eur(total_net_invested))
     with r1c3:
-        st.metric("Fees", fmt_eur(total_fees), delta=f"↓{fees_pct:.2f}%", delta_color="off")
+        st.metric("Fees", fmt_eur(total_fees), delta=None if privacy_on() else f"↓{fees_pct:.2f}%", delta_color="off")
 
     r2c1, r2c2, r2c3 = st.columns(3)
     with r2c1:
         pl_price_pct = (pl_price_approx / total_gross_theor * 100) if total_gross_theor > 0 else 0
         st.metric(
             "P/L Price approx.", fmt_eur(pl_price_approx, "€ {:+,.2f}"),
-            delta=f"{pl_price_pct:+.2f}%",
+            delta=None if privacy_on() else f"{pl_price_pct:+.2f}%",
             delta_color="normal" if pl_price_approx >= 0 else "off",
         )
     with r2c2:

@@ -6,7 +6,7 @@ dei singoli fondi e del portafoglio in generale.
 """
 
 import streamlit as st
-from utils.privacy import fmt_eur
+from utils.privacy import fmt_eur, privacy_on
 import pandas as pd
 
 from config import FUND_COLORS
@@ -107,7 +107,7 @@ def daily_dashboard(
     st.metric(
         "Daily P&L",
         fmt_eur(total_daily_pnl, "€{:+,.2f}"),
-        delta=f"{portfolio_pnl_pct:+.2f}%",
+        delta=None if privacy_on() else f"{portfolio_pnl_pct:+.2f}%",
         delta_color="off",
         border=True,
         chart_data=portfolio_pnl_spark,
@@ -189,7 +189,7 @@ def daily_dashboard(
             st.metric(
                 "Daily P&L",
                 fmt_eur(daily_pnl, "€{:+,.2f}"),
-                delta=f"{fund_pnl_pct:+.2f}%",
+                delta=None if privacy_on() else f"{fund_pnl_pct:+.2f}%",
                 delta_color="off",
                 border=True,
                 chart_data=fund_pnl_spark,

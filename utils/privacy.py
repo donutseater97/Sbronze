@@ -14,8 +14,9 @@ per l'intera sessione su tutte le pagine.
 
 import streamlit as st
 
-# Stringa usata al posto degli importi oscurati
+# Stringhe usate al posto dei valori oscurati
 MASK = "€ ••••"
+MASK_PLAIN = "••••"
 
 
 def privacy_on() -> bool:
@@ -47,21 +48,44 @@ def mask_text(text: str) -> str:
 
 
 def render_privacy_toggle() -> None:
-    """Renderizza il toggle privacy (abilitato solo dopo autenticazione).
+    """Renderizza il controllo privacy nella home.
 
-    Da chiamare nella pagina home. Lo stato è condiviso tra tutte le pagine
-    tramite st.session_state["privacy_mode"].
+    Attivazione libera (nessuna password). La disattivazione richiede la
+    password admin (la stessa della pagina "Add Transactions & Funds"),
+    inserita direttamente qui senza cambiare pagina.
+
+    Lo stato vive in st.session_state["privacy_mode"] — una chiave NON
+    legata a un widget, così persiste navigando tra le pagine (le chiavi
+    dei widget vengono eliminate da Streamlit quando il widget non è
+    presente nella pagina corrente).
     """
-    authenticated = st.session_state.get("authenticated", False)
-    st.toggle(
-        "🙈 Privacy mode — nascondi valori €",
-        key="privacy_mode",
-        disabled=not authenticated,
-        help=(
-            "Oscura tutti gli importi in euro del portafoglio (contributi, "
-            "controvalore, P/L) mostrando solo le percentuali. I NAV dei "
-            "fondi restano visibili perché sono prezzi pubblici. "
-            "Sbloccabile inserendo la password nella pagina "
-            "\"Add Transactions & Funds\"."
-        ),
-    )
+    from config import OWNER_PASSWORD  # import locale per evitare cicli
+
+    if not privacy_on():
+        activated = st.toggle(
+            "🙈 Privacy mode — nascondi valori €",
+            value=False,
+            key="_privacy_toggle_activate",
+            help=(
+                "Oscura tutti gli importi e le quantità del portafoglio. "
+                "Attivabile liberamente; per disattivarla serve la password admin."
+            ),
+        )
+        if activated:
+            st.session_state.privacy_mode = True
+            st.rerun()
+    else:
+        col_status, col_unlock = st.columns([3, 2])
+        with col_status:
+            st.markdown("🙈 **Privacy mode attiva** — valori del portafoglio nascosti")
+        with col_unlock:
+            with st.popover("🔓 Disattiva"):
+                pwd = st.text_input(
+                    "Password admin", type="password", key="_privacy_pwd"
+                )
+                if st.button("Conferma", key="_privacy_pwd_btn"):
+                    if pwd == OWNER_PASSWORD:
+                        st.session_state.privacy_mode = False
+                        st.rerun()
+                    else:
+                        st.error("Password errata")

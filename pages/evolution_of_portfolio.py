@@ -246,7 +246,8 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
             y=chart_df["Portfolio"],
             name="Portfolio",
             marker=dict(color=portfolio_colors),
-            hovertemplate="<b>Portfolio</b>: %{y:,.2f}%<extra></extra>",
+            hovertemplate=("<b>Portfolio</b><extra></extra>" if privacy_on()
+                           else "<b>Portfolio</b>: %{y:,.2f}%<extra></extra>"),
         ))
     else:
         for fund in filter_funds:
@@ -254,14 +255,16 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
             fig.add_trace(go.Bar(
                 x=chart_df["date"], y=chart_df[fund],
                 name=fund, marker=dict(color=color),
-                hovertemplate=f"<b>{fund}</b>: {hover_fmt}<extra></extra>",
+                hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
+                               else f"<b>{fund}</b>: {hover_fmt}<extra></extra>"),
             ))
 
         # Traccia invisibile per totale nel tooltip
         fig.add_trace(go.Scatter(
             x=chart_df["date"], y=[0] * len(chart_df),
             mode="lines", line=dict(width=0), showlegend=False,
-            hovertemplate="<b>Total</b>: " + chart_df["Total"].apply(total_fmt) + "<extra></extra>",
+            hovertemplate=("<b>Total</b><extra></extra>" if privacy_on()
+                           else "<b>Total</b>: " + chart_df["Total"].apply(total_fmt) + "<extra></extra>"),
         ))
 
     fig.update_layout(
@@ -279,6 +282,8 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
     )
     if portfolio_only_mode:
         fig.update_yaxes(tickformat=".1f")
+    if privacy_on():
+        fig.update_yaxes(showticklabels=False)
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("absolute_pct_change_by_fund"))
 
 
@@ -295,7 +300,8 @@ def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
             x=fund_data["date"], y=fund_data[fund],
             mode="lines", name=fund,
             line=dict(color=FUND_COLORS.get(fund, "#999999"), width=2),
-            hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
+            hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
+                           else f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>"),
         ))
 
     fig.update_layout(
@@ -305,6 +311,8 @@ def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
         dragmode="pan",
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
+    if privacy_on():
+        fig.update_yaxes(showticklabels=False)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -580,7 +588,8 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
             x=comp_df["date"], y=comp_df[fund],
             mode="lines", name=fund,
             line=dict(color=color, width=0.5),
-            hovertemplate=f"<b>{fund}</b>: %{{y:.2f}}%<extra></extra>",
+            hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
+                           else f"<b>{fund}</b>: %{{y:.2f}}%<extra></extra>"),
             stackgroup="one",
             groupnorm="percent",
             fillcolor=f"rgba({r}, {g}, {b}, 0.7)",
@@ -594,4 +603,6 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
         yaxis=dict(range=[0, 100], ticksuffix="%"),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
+    if privacy_on():
+        fig.update_yaxes(showticklabels=False)
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("portfolio_composition"))

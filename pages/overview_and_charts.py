@@ -22,7 +22,7 @@ from components.chart_helpers import (
     RANGE_SELECTOR_BUTTONS_SHORT,
 )
 from utils.formatting import count_decimals, format_qty
-from utils.privacy import privacy_on, fmt_eur, mask_text, render_privacy_toggle, MASK
+from utils.privacy import privacy_on, fmt_eur, mask_text, render_privacy_toggle, MASK, MASK_PLAIN
 
 
 def overview_and_charts(
@@ -204,6 +204,7 @@ def overview_and_charts(
 
     # Privacy: nelle colonne combinate € (%) mostra solo la percentuale
     if privacy_on():
+        display_summary["Quantity"] = MASK_PLAIN
         display_summary["Return [€ (%)]"] = summary["Total Return (%)"].map(
             lambda p: f"{MASK} ({p:+.2f}%)"
         )
