@@ -11,6 +11,7 @@ Mostra i grafici storici dei prezzi NAV per ciascun fondo con:
 
 import os
 import streamlit as st
+from utils.privacy import privacy_on
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -100,38 +101,6 @@ def historical_prices(
     # ----- Dati caricati con successo -----
     st.success(f"✅ Loaded {len(hist_df)} price records for {len(hist_df.columns)-1} funds")
 
-    # ----- Carica metadata delle sorgenti (se presente) e mostra solo qui -----
-    sources_path = os.path.join(os.path.dirname(HISTORICAL_FILE), "historical_sources.csv")
-    sources_map: dict = {}
-    if os.path.exists(sources_path):
-        try:
-            src_df = pd.read_csv(sources_path)
-            for _, r in src_df.iterrows():
-                sources_map[r.get("Fund")] = {"source": r.get("Source", ""), "last_date": r.get("LastDate", "")}
-            # Build a compact summary and show it immediately below the success message
-            # Build summary ordered as in funds.csv (preserve user-configured order)
-            def _pretty_source(src: str) -> str:
-                if not src:
-                    return "Unknown"
-                if "JPMorgan" in src or "JP Morgan" in src:
-                    return "JP Morgan"
-                return src
-
-            funds_order = funds["Fund"].tolist() if "Fund" in funds.columns else list(sources_map.keys())
-            summary_items = []
-            for f in funds_order:
-                if f in sources_map:
-                    info = sources_map[f]
-                    pretty = _pretty_source(info.get("source", ""))
-                    last = info.get("last_date", "")
-                    summary_items.append(f"{f}: {pretty} ({last})")
-
-            if summary_items:
-                # Use newline-separated caption so items wrap vertically in the UI
-                st.caption("\n".join(summary_items))
-        except Exception:
-            st.warning("Could not read historical_sources.csv metadata")
-
     # Banner "last updated"
     try:
         max_date = pd.to_datetime(hist_df.get("date"), errors="coerce").max()
@@ -154,8 +123,6 @@ def historical_prices(
     fund_cols = [c for c in hist_df.columns if c in funds_fresh["Fund"].tolist()]
     hist_df_display = hist_df[["date"] + fund_cols].copy()
     hist_df_display["date"] = pd.to_datetime(hist_df_display["date"])
-
-    
 
     # ----- Filtro fondi -----
     if "hist_view_mode" not in st.session_state:
@@ -250,9 +217,9 @@ def historical_prices(
 
     # ===== RENDERING GRAFICO =====
     if st.session_state.hist_view_mode == "combined":
-           _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map)
+        _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d)
     else:
-           _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map)
+        _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d)
 
     # ===== LEGENDA =====
     _render_unified_legend(selected_funds)
@@ -265,7 +232,7 @@ def historical_prices(
 # SOTTO-FUNZIONI (private)
 # =============================================================================
 
-def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map=None):
+def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d):
     """Vista combinata: pannello % return normalizzato in alto + grafici NAV individuali sotto.
 
     Layout a subplots con x-axis condiviso (zoom/pan temporale sincronizzato).
@@ -414,8 +381,9 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                     f"Date: {t_date.strftime('%Y-%m-%d')}<br>"
                     f"Qty: {t_row['Quantity']:.3f}<br>"
                     f"Price: €{t_row['Price (€)']:.2f}<br>"
-                    f"Fees: €{t_row['Fees (€)']:.2f}<br>"
-                    f"Total: €{(t_row['Quantity'] * t_row['Price (€)'] + t_row['Fees (€)']):.2f}"
+                    + ("" if privacy_on() else
+                       f"Fees: €{t_row['Fees (€)']:.2f}<br>"
+                       f"Total: €{(t_row['Quantity'] * t_row['Price (€)'] + t_row['Fees (€)']):.2f}")
                 )
             fig.add_trace(
                 go.Scatter(
@@ -558,10 +526,8 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
 
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("historical_combined"))
 
-    
 
-
-def _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d, sources_map=None):
+def _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d):
     """Vista griglia: un grafico per fondo, max 3 per riga."""
     cols_per_row = 2 if len(selected_funds) > 6 else min(3, len(selected_funds))
 
@@ -579,10 +545,10 @@ def _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, st
         cols = st.columns(len(row_funds))
         for col_slot, fund in zip(cols, row_funds):
             with col_slot:
-                _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df, sources_map)
+                _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df)
 
 
-def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df, sources_map=None):
+def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
     """Renderizza il grafico di un singolo fondo (vista griglia)."""
     fund_df = plot_df[["date", fund]].dropna().sort_values("date")
     if len(fund_df) == 0:
@@ -627,8 +593,9 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df, sources_
                 f"Date: {t_date.strftime('%Y-%m-%d')}<br>"
                 f"Quantity: {t_row['Quantity']:.3f}<br>"
                 f"Price: €{t_row['Price (€)']:.2f}<br>"
-                f"Fees: €{t_row['Fees (€)']:.2f}<br>"
-                f"Total: €{(t_row['Quantity'] * t_row['Price (€)'] + t_row['Fees (€)']):.2f}"
+                + ("" if privacy_on() else
+                   f"Fees: €{t_row['Fees (€)']:.2f}<br>"
+                   f"Total: €{(t_row['Quantity'] * t_row['Price (€)'] + t_row['Fees (€)']):.2f}")
             )
         fig.add_trace(go.Scatter(
             x=trans_dates, y=trans_prices, mode="markers", name=f"{fund} Transactions",
@@ -655,8 +622,6 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df, sources_
     fig.update_yaxes(**yaxis_cfg)
 
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config(f"historical_{fund}"))
-
-    
 
 
 def _render_unified_legend(selected_funds):

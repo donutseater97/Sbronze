@@ -8,6 +8,7 @@ Mostra la cronologia completa delle transazioni con:
 """
 
 import streamlit as st
+from utils.privacy import privacy_on, fmt_eur, MASK
 import pandas as pd
 
 from config import FUND_COLORS
@@ -109,43 +110,6 @@ def transaction_history(
     display_df["_delta_qty_raw"] = trans_df["Δ Quantity"].values
     display_df["_delta_net_inv_disp"] = display_df["_delta_net_inv_raw"].apply(format_delta_net_inv)
 
-    # ----- Transaction P/L columns (based on latest available price) -----
-    display_df["Transaction P/L (%)"] = pd.NA
-    display_df["Transaction P/L (€)"] = pd.NA
-    display_df["_tx_pl_pct_raw"] = pd.NA
-    display_df["_tx_pl_eur_raw"] = pd.NA
-    try:
-        if len(hist_data_global) > 0 and "date" in hist_data_global.columns:
-            latest_date = pd.to_datetime(hist_data_global["date"]).max()
-            last_row_df = hist_data_global[pd.to_datetime(hist_data_global["date"]) == latest_date]
-            if len(last_row_df) > 0:
-                last_row = last_row_df.iloc[0]
-                # Build map fund->last price
-                last_prices = {c: last_row[c] for c in last_row.index if c != "date"}
-
-                pct_list = []
-                eur_list = []
-                for _, drow in display_df.iterrows():
-                    fund = drow.get("Fund")
-                    price_tx = drow.get("Price (€)")
-                    qty = drow.get("Quantity")
-                    last_price = last_prices.get(fund, None)
-                    if pd.notna(last_price) and pd.notna(price_tx) and price_tx != 0 and pd.notna(qty):
-                        pl_eur = (last_price - price_tx) * qty
-                        pl_pct = (last_price / price_tx - 1.0) * 100.0
-                    else:
-                        pl_eur = pd.NA
-                        pl_pct = pd.NA
-                    pct_list.append(pl_pct)
-                    eur_list.append(pl_eur)
-
-                display_df["_tx_pl_pct_raw"] = pct_list
-                display_df["_tx_pl_eur_raw"] = eur_list
-                display_df["Transaction P/L (%)"] = display_df["_tx_pl_pct_raw"]
-                display_df["Transaction P/L (€)"] = display_df["_tx_pl_eur_raw"]
-    except Exception:
-        pass
-
     def _format_delta_qty_row(row):
         dq = row["_delta_qty_raw"]
         if pd.isna(dq):
@@ -180,14 +144,6 @@ def transaction_history(
     display_df = display_df.drop(columns=["Net Invested", "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity"])
     display_df["_fund_type"] = trans_df["Fund"].values
 
-    # Ensure Transaction P/L columns are at the end of the table
-    pl_cols = ["Transaction P/L (%)", "Transaction P/L (€)"]
-    other_cols = [c for c in display_df.columns if c not in pl_cols]
-    # Keep original order for other_cols, then append PL columns
-    display_df = display_df[other_cols + [c for c in pl_cols if c in display_df.columns]]
-
-    # (debug view removed)
-
     # ----- Stile tabella -----
     def style_fund_rows(row):
         """Colora Fund col, Net Invested delta e Quantity delta."""
@@ -216,38 +172,28 @@ def transaction_history(
                     styles.append(f"background-color: {green}")
                 else:
                     styles.append(f"background-color: {red}")
-            elif col == "Transaction P/L (%)":
-                dv = row.get("_tx_pl_pct_raw", None)
-                if pd.isna(dv) or dv is None:
-                    styles.append("")
-                elif dv > 0:
-                    styles.append(f"background-color: {green}")
-                else:
-                    styles.append(f"background-color: {red}")
-            elif col == "Transaction P/L (€)":
-                dv = row.get("_tx_pl_eur_raw", None)
-                if pd.isna(dv) or dv is None:
-                    styles.append("")
-                elif dv > 0:
-                    styles.append(f"background-color: {green}")
-                else:
-                    styles.append(f"background-color: {red}")
             else:
                 styles.append("")
         return styles
 
+    # Privacy: oscura le colonne € personali (il Price resta: è il NAV pubblico)
+    if privacy_on():
+        for _col in ["Fees (€)", "Gross Contribution", "Net Invested (Δ vs Exp)"]:
+            if _col in display_df.columns:
+                display_df[_col] = MASK
+
     styled_df = display_df.style.apply(style_fund_rows, axis=1)
 
-    st.dataframe(styled_df, width="stretch", hide_index=True, column_config={
+    _col_config = {
         "Price (€)": st.column_config.NumberColumn(format="€%.2f"),
-        "Fees (€)": st.column_config.NumberColumn(format="€%.2f"),
-        "Gross Contribution": st.column_config.NumberColumn(format="€%.2f"),
-        "Transaction P/L (€)": st.column_config.NumberColumn(format="€%.2f"),
-        "Transaction P/L (%)": st.column_config.NumberColumn(format="%.2f%%"),
         "_delta_net_inv_raw": None, "_delta_qty_raw": None,
         "_delta_net_inv_disp": None, "_delta_qty_disp": None, "_fund_type": None,
-        "_tx_pl_pct_raw": None, "_tx_pl_eur_raw": None,
-    })
+    }
+    if not privacy_on():
+        _col_config["Fees (€)"] = st.column_config.NumberColumn(format="€%.2f")
+        _col_config["Gross Contribution"] = st.column_config.NumberColumn(format="€%.2f")
+
+    st.dataframe(styled_df, width="stretch", hide_index=True, column_config=_col_config)
 
     # CSS per testo piccolo nelle metriche
     st.markdown("""
@@ -291,25 +237,28 @@ def transaction_history(
     # Display totals
     r1c1, r1c2, r1c3 = st.columns(3)
     with r1c1:
-        st.metric("Total Gross Contribution", f"€ {total_gross_theor:,.2f}")
+        st.metric("Total Gross Contribution", fmt_eur(total_gross_theor))
     with r1c2:
-        st.metric("Total Net Invested", f"€ {total_net_invested:,.2f}")
+        st.metric("Total Net Invested", fmt_eur(total_net_invested))
     with r1c3:
-        st.metric("Fees", f"€ {total_fees:,.2f}", delta=f"↓{fees_pct:.2f}%", delta_color="off")
+        st.metric("Fees", fmt_eur(total_fees), delta=f"↓{fees_pct:.2f}%", delta_color="off")
 
     r2c1, r2c2, r2c3 = st.columns(3)
     with r2c1:
         pl_price_pct = (pl_price_approx / total_gross_theor * 100) if total_gross_theor > 0 else 0
         st.metric(
-            "P/L Price approx.", f"€ {pl_price_approx:+,.2f}",
+            "P/L Price approx.", fmt_eur(pl_price_approx, "€ {:+,.2f}"),
             delta=f"{pl_price_pct:+.2f}%",
             delta_color="normal" if pl_price_approx >= 0 else "off",
         )
     with r2c2:
-        pl_qty_display = (
-            f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})"
-            if last_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
-        )
+        if privacy_on():
+            pl_qty_display = MASK
+        else:
+            pl_qty_display = (
+                f"€ {pl_qty_approx:+,.2f} (Now: € {pl_qty_approx_now:+,.2f})"
+                if last_date_str != "-" else f"€ {pl_qty_approx:+,.2f}"
+            )
         st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display)
     with r2c3:
         st.metric("Number of Contributions", f"{num_contributions}")

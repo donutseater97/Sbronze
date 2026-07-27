@@ -22,6 +22,7 @@ from components.chart_helpers import (
     RANGE_SELECTOR_BUTTONS_SHORT,
 )
 from utils.formatting import count_decimals, format_qty
+from utils.privacy import privacy_on, fmt_eur, mask_text, render_privacy_toggle, MASK
 
 
 def overview_and_charts(
@@ -41,6 +42,7 @@ def overview_and_charts(
 
     # ===== HEADER =====
     st.header(f"📈 Portfolio Summary as of {last_date_str}")
+    render_privacy_toggle()
 
     # ===== FILTRO FONDI =====
     fund_list = funds["Fund"].tolist() if len(funds) > 0 else []
@@ -200,6 +202,15 @@ def overview_and_charts(
         columns={"Total Return [€ (%)]": "Return [€ (%)]"}
     )
 
+    # Privacy: nelle colonne combinate € (%) mostra solo la percentuale
+    if privacy_on():
+        display_summary["Return [€ (%)]"] = summary["Total Return (%)"].map(
+            lambda p: f"{MASK} ({p:+.2f}%)"
+        )
+        display_summary["Net Return [€ (%)]"] = summary["Net Return (%)"].map(
+            lambda p: f"{MASK} ({p:+.2f}%)"
+        )
+
     # Valori grezzi per colorazione condizionale
     display_summary["_Total_Return_raw"] = summary["Total Return (€)"]
     display_summary["_Net_Return_raw"] = summary["Net Return (€)"]
@@ -207,7 +218,7 @@ def overview_and_charts(
 
     # Formattazione colonne €
     for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
-        display_summary[col] = display_summary[col].apply(lambda x: f"€ {x:,.2f}")
+        display_summary[col] = display_summary[col].apply(lambda x: fmt_eur(x))
 
     # Latest Price con % variazione giornaliera
     def _fmt_latest_price_row(row):
@@ -228,7 +239,7 @@ def overview_and_charts(
     def _fmt_mv_row(row):
         fund = row["Fund"]
         mv = summary.loc[summary["Fund"] == fund, "Market Value (€)"].values[0]
-        return f"€ {float(mv):,.2f}" if pd.notna(mv) else "€ 0.00"
+        return fmt_eur(float(mv)) if pd.notna(mv) else fmt_eur(0.0)
 
     display_summary["Market Value (€)"] = display_summary.apply(_fmt_mv_row, axis=1)
     display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(
@@ -363,10 +374,10 @@ def overview_and_charts(
 
     row1c1, row1c2, row1c3 = st.columns(3)
     with row1c1:
-        st.metric("Total Return", f"€ {total_return:,.2f}", delta=f"{total_return_pct:+.2f}%", delta_color="normal", border=True,
+        st.metric("Total Return", fmt_eur(total_return), delta=f"{total_return_pct:+.2f}%", delta_color="normal", border=True,
                   chart_data=spark_return if spark_return else _empty_spark, chart_type="line")
     with row1c2:
-        st.metric("Total Net Return", f"€ {total_net_return:,.2f}", delta=f"{total_net_return_pct:+.2f}%", delta_color="normal", border=True,
+        st.metric("Total Net Return", fmt_eur(total_net_return), delta=f"{total_net_return_pct:+.2f}%", delta_color="normal", border=True,
                   chart_data=spark_net_return if spark_net_return else _empty_spark, chart_type="line")
     with row1c3:
         # Daily P/L — calcolo diretto da dati storici e quantità
@@ -389,18 +400,18 @@ def overview_and_charts(
                 daily_pnl_prev_mv += fund_qty * float(s.iloc[1])
         daily_pnl_pct = (daily_pnl_eur / daily_pnl_prev_mv * 100) if daily_pnl_prev_mv > 0 else 0.0
         pct_sign = "+" if daily_pnl_pct > 0 else ""
-        st.metric("Daily P/L", f"€ {daily_pnl_eur:+,.2f}", delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal", border=True,
+        st.metric("Daily P/L", fmt_eur(daily_pnl_eur, "€ {:+,.2f}"), delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal", border=True,
                   chart_data=spark_daily_pnl if spark_daily_pnl else _empty_spark, chart_type="bar")
 
     row2c1, row2c2, row2c3 = st.columns(3)
     with row2c1:
-        st.metric("Total Gross Contributions", f"€ {total_gross:,.2f}", border=True,
+        st.metric("Total Gross Contributions", fmt_eur(total_gross), border=True,
                   chart_data=spark_gross if spark_gross else _empty_spark, chart_type="line")
     with row2c2:
-        st.metric("Total Market Value", f"€ {total_market_value:,.2f}", border=True,
+        st.metric("Total Market Value", fmt_eur(total_market_value), border=True,
                   chart_data=spark_mv if spark_mv else _empty_spark, chart_type="line")
     with row2c3:
-        st.metric("Total Fees", f"€ {total_fees:,.2f}", border=True,
+        st.metric("Total Fees", fmt_eur(total_fees), border=True,
                   chart_data=spark_fees if spark_fees else _empty_spark, chart_type="line")
 
     # ===== GRAFICI =====
@@ -559,7 +570,8 @@ def _render_allocation_pies(df, funds, hist_data):
             marker=dict(colors=[color_map.get(c, "#999999") for c in alloc_gc["Category"]]),
             textinfo="percent", textposition="inside",
             textfont=dict(size=14, color="#ffffff", family="system-ui"),
-            hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>",
+            hovertemplate=("<b>%{label}</b><br>%{percent}<extra></extra>" if privacy_on()
+                           else "<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"),
         )])
         fig_gc.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="system-ui", size=12))
         st.plotly_chart(fig_gc, use_container_width=True)
@@ -571,7 +583,8 @@ def _render_allocation_pies(df, funds, hist_data):
             marker=dict(colors=[color_map.get(c, "#999999") for c in alloc_mv["Category"]]),
             textinfo="percent", textposition="inside",
             textfont=dict(size=14, color="#ffffff", family="system-ui"),
-            hovertemplate="<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>",
+            hovertemplate=("<b>%{label}</b><br>%{percent}<extra></extra>" if privacy_on()
+                           else "<b>%{label}</b><br>€%{value:,.2f}<br>%{percent}<extra></extra>"),
         )])
         fig_mv.update_layout(height=520, showlegend=False, hovermode="closest", font=dict(family="system-ui", size=12))
         st.plotly_chart(fig_mv, use_container_width=True)
@@ -599,7 +612,8 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
         x=stair_df["date_dt"], y=stair_df["Gross Contribution"],
         mode="lines", name="Gross Contribution",
         line=dict(color="#f093fb", width=2.5),
-        hovertemplate="<b>Gross Contribution</b>: €%{y:,.2f}<extra></extra>",
+        hovertemplate=("<b>Gross Contribution</b><extra></extra>" if privacy_on()
+                       else "<b>Gross Contribution</b>: €%{y:,.2f}<extra></extra>"),
         fill="tozeroy", fillcolor="rgba(102, 126, 234, 0.1)",
     ))
 
@@ -609,7 +623,8 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
             x=market_value_df["date"], y=market_value_df["market_value"],
             mode="lines", name="Market Value",
             line=dict(color="#667eea", width=2.5),
-            hovertemplate="<b>Market Value</b>: €%{y:,.2f}<extra></extra>",
+            hovertemplate=("<b>Market Value</b><extra></extra>" if privacy_on()
+                           else "<b>Market Value</b>: €%{y:,.2f}<extra></extra>"),
         ))
 
     # Annotazioni ultimo data point
@@ -617,7 +632,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
         last_gc = stair_df["Gross Contribution"].iloc[-1]
         last_gc_date = stair_df["date_dt"].iloc[-1]
         fig.add_annotation(
-            x=last_gc_date, y=last_gc, text=f"€{last_gc:,.0f}",
+            x=last_gc_date, y=last_gc, text=mask_text(f"€{last_gc:,.0f}"),
             showarrow=False, xanchor="left", xshift=10,
             font=dict(size=13, color="#f093fb"),
             bordercolor="#f093fb", borderwidth=1.5, borderpad=4,
@@ -627,7 +642,7 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
         last_mv = market_value_df["market_value"].iloc[-1]
         last_mv_date = market_value_df["date"].iloc[-1]
         fig.add_annotation(
-            x=last_mv_date, y=last_mv, text=f"€{last_mv:,.0f}",
+            x=last_mv_date, y=last_mv, text=mask_text(f"€{last_mv:,.0f}"),
             showarrow=False, xanchor="left", xshift=10,
             font=dict(size=13, color="#667eea"),
             bordercolor="#667eea", borderwidth=1.5, borderpad=4,
@@ -642,6 +657,8 @@ def _render_investment_evolution_chart(stair_df, market_value_df, has_alloc_filt
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
     fig.update_yaxes(autorange=True, rangemode="normal", fixedrange=False, showspikes=True, spikemode="across")
+    if privacy_on():
+        fig.update_yaxes(showticklabels=False, title_text="Value (€, nascosto)")
 
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("investment_evolution"))
 

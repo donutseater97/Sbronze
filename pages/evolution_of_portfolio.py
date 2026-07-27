@@ -9,6 +9,7 @@ Mostra l'evoluzione dettagliata del portafoglio:
 """
 
 import streamlit as st
+from utils.privacy import privacy_on, mask_text
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -128,16 +129,21 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
             default="1D", key="revenue_pnl_freq"
         )
     with controls_col_r:
+        _display_options = (
+            ["Funds (%)", "Portfolio (%)"] if privacy_on()
+            else ["Absolute (€)", "Funds (%)", "Portfolio (%)"]
+        )
+        _display_default = "Funds (%)" if privacy_on() else "Absolute (€)"
         display_mode = st.segmented_control(
             "Display",
-            ["Absolute (€)", "Funds (%)", "Portfolio (%)"],
-            default="Absolute (€)",
+            _display_options,
+            default=_display_default,
             key="revenue_pnl_display_mode",
         )
     if freq_label is None:
         freq_label = "1D"
-    if display_mode is None:
-        display_mode = "Absolute (€)"
+    if display_mode is None or (privacy_on() and display_mode == "Absolute (€)"):
+        display_mode = _display_default
     freq = freq_options[freq_label]
 
     if len(hist_asc) == 0:
@@ -303,6 +309,10 @@ def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
 
 
 def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund):
+    if privacy_on():
+        st.subheader("📈 Portfolio Market Value Evolution - Daily Holdings Value")
+        st.info("🙈 Tabella nascosta in privacy mode (contiene solo valori in €).")
+        return
     """Tabella Market Value giornaliero con variazione € per fondo."""
     st.subheader("📈 Portfolio Market Value Evolution - Daily Holdings Value")
     st.caption("Shows the market value of your holdings (quantity held × daily NAV) with € change from previous day")
@@ -429,13 +439,14 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
         mode="lines", name="Portfolio MV",
         line=dict(color="#667eea", width=3),
         fill="tozeroy", fillcolor="rgba(102, 126, 234, 0.1)",
-        hovertemplate="<b>Portfolio MV</b>: €%{y:,.2f}<extra></extra>",
+        hovertemplate=("<b>Portfolio MV</b><extra></extra>" if privacy_on()
+                       else "<b>Portfolio MV</b>: €%{y:,.2f}<extra></extra>"),
     ))
 
     # Annotazione ultimo valore totale
     last_mv = mv_df["Daily MV (€)"].iloc[-1]
     fig.add_annotation(
-        x=latest_date, y=last_mv, text=f"€{last_mv:,.0f}",
+        x=latest_date, y=last_mv, text=mask_text(f"€{last_mv:,.0f}"),
         showarrow=False, xanchor="left", xshift=10,
         font=dict(size=14, color="#667eea"),
         bordercolor="#667eea", borderwidth=2, borderpad=4,
@@ -451,11 +462,12 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
                 x=mv_df["date"], y=mv_df[col],
                 mode="lines", name=fund,
                 line=dict(color=color, width=2, dash="dot"),
-                hovertemplate=f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>",
+                hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
+                               else f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>"),
             ))
             last_fund_mv = mv_df[col].iloc[-1]
             fig.add_annotation(
-                x=latest_date, y=last_fund_mv, text=f"€{last_fund_mv:,.0f}",
+                x=latest_date, y=last_fund_mv, text=mask_text(f"€{last_fund_mv:,.0f}"),
                 showarrow=False, xanchor="left", xshift=10,
                 font=dict(size=13, color=color),
                 bordercolor=color, borderwidth=1.5, borderpad=4,
@@ -485,6 +497,8 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
         rangemode="normal", fixedrange=False, showspikes=True, spikemode="across",
         zeroline=True, zerolinecolor="rgba(150,150,150,0.5)", zerolinewidth=2,
     )
+    if privacy_on():
+        fig.update_yaxes(showticklabels=False, title_text="Market Value (€, nascosto)")
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("portfolio_mv_evolution"))
 
 

@@ -51,6 +51,10 @@ st.title(f"📊 {APP_TITLE}")
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+# Modalità privacy (oscura valori €) — attivabile dalla home solo se autenticati
+if "privacy_mode" not in st.session_state:
+    st.session_state.privacy_mode = False
+
 
 # =============================================================================
 # CARICAMENTO DATI GLOBALI

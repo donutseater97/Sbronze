@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 
 from config import FUND_COLORS
 from components.chart_helpers import get_plotly_config
+from utils.privacy import fmt_eur
 from utils.morningstar_api import (
     fetch_security_details_xml,
     parse_fund_analytics,
@@ -111,7 +112,7 @@ def morningstar_api_data(funds: pd.DataFrame, transactions: pd.DataFrame,
     total_value = sum(active_weights.values())
     n_holdings = len(agg["holdings"]) if not agg["holdings"].empty else 0
     c1, c2, c3 = st.columns(3)
-    c1.metric("Importo Portafoglio", f"{total_value:,.2f} €")
+    c1.metric("Importo Portafoglio", fmt_eur(total_value, "{:,.2f} €"))
     c2.metric("Numero di strumenti", f"{len(per_fund)}")
     c3.metric("Partecipazioni aggregate", f"{n_holdings}")
 
