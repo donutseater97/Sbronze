@@ -33,9 +33,6 @@ HISTORICAL_FILE   = os.path.join(_ROOT_DIR, "data", "historical_data.csv")
 FUNDS_REPO_PATH        = "data/funds.csv"
 TRANSACTIONS_REPO_PATH = "data/transaction_history.csv"
 
-# Password per l'area admin (add transactions / add funds)
-OWNER_PASSWORD = "123"
-
 # Mapping colori per ciascun fondo — popolato da load_data()
 FUND_COLORS: dict[str, str] = {}
 
@@ -151,6 +148,9 @@ def _get_secret(name: str, default: str | None = None) -> str | None:
 GITHUB_TOKEN  = _get_secret("GITHUB_TOKEN")
 GITHUB_REPO   = _get_secret("GITHUB_REPO", "donutseater97/Sbronze")
 GITHUB_BRANCH = _get_secret("GITHUB_BRANCH", "main")
+
+# Password per l'area admin (add transactions / add funds)
+OWNER_PASSWORD = _get_secret("OWNER_PASSWORD")
 
 
 def github_get_file_sha(path: str) -> str | None:
