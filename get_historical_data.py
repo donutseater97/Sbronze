@@ -61,26 +61,42 @@ def fetch_investgo(ticker, fund_name):
 
 
 def fetch_morningstar(ticker, fund_name):
-    """Fallback: Morningstar public timeseries API (same official NAV chain
-    that investing.com uses). Ticker is the Morningstar ID from funds.csv."""
     print(f"DEBUG: Trying Morningstar fallback for {fund_name} (ticker={ticker})")
+
     url = (
         "https://tools.morningstar.it/api/rest.svc/timeseries_price/jbyiq3rhyf"
         f"?id={ticker}]2]0]FOITA$$ALL&currencyId=EUR&idtype=Morningstar"
         "&frequency=daily&startDate=1990-01-01&outputType=JSON"
     )
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    r = requests.get(url, headers=headers, timeout=30)
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+
+    print("=" * 80)
+    print("URL:", r.url)
+    print("STATUS:", r.status_code)
+    print("CONTENT-TYPE:", r.headers.get("Content-Type"))
+    print("FIRST 1000 CHARS:")
+    print(r.text[:1000])
+    print("=" * 80)
+
     r.raise_for_status()
-    detail = r.json()["TimeSeries"]["Security"][0]["HistoryDetail"]
+
+    data = r.json()
+
+    detail = data["TimeSeries"]["Security"][0]["HistoryDetail"]
+
     hist = pd.DataFrame(detail)[["EndDate", "Value"]]
     hist.columns = ["Date", fund_name]
     hist["Date"] = pd.to_datetime(hist["Date"])
     hist[fund_name] = pd.to_numeric(hist[fund_name], errors="coerce").round(2)
     hist = hist.dropna()
-    print(f"DEBUG: Morningstar fallback returned {len(hist)} rows for {fund_name}")
-    # Record source for this fund (fallback)
+
     fund_sources[fund_name] = "Morningstar"
+
     return hist
 
 
