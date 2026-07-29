@@ -23,11 +23,18 @@ import xml.etree.ElementTree as ET
 # Costanti API e mapping dei codici Morningstar
 # -----------------------------------------------------------------------------
 
-_BASE_URL = (
-    "https://tools.morningstar.it/api/rest.svc/security_details/jbyiq3rhyf"
+_MORNINGSTAR_KEYS = [
+    "jbyiq3rhyf",
+    "nen6ere626",
+    "t92wz0sj7c",
+]
+
+_BASE_URL_TEMPLATE = (
+    "https://tools.morningstar.it/api/rest.svc/security_details/{key}"
     "?id={msid}&idtype=msid&responseViewFormat=json&viewid=snapshot"
     "&currencyId=EUR&languageId=it-IT"
 )
+
 _HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 # GlobalStockSectorBreakdown → nomi settore (schema Morningstar a 11 settori)
@@ -68,32 +75,46 @@ BOND_STYLEBOX_COLS = ["Ltd", "Mod", "Ext"]           # sensibilità ai tassi
 # Fetch e parsing per singolo fondo
 # -----------------------------------------------------------------------------
 def fetch_security_details_xml(msid: str, timeout: int = 30) -> str:
-    url = _BASE_URL.format(msid=msid)
+    last_error = None
 
-    resp = requests.get(
-        url,
-        headers=_HEADERS,
-        timeout=timeout,
-        allow_redirects=True,
-    )
+    for key in _MORNINGSTAR_KEYS:
+        url = _BASE_URL_TEMPLATE.format(key=key, msid=msid)
 
-    resp.raise_for_status()
+        try:
+            resp = requests.get(
+                url,
+                headers=_HEADERS,
+                timeout=timeout,
+                allow_redirects=True,
+            )
 
-    text = resp.text.strip()
+            if resp.status_code != 200:
+                print(f"[{key}] HTTP {resp.status_code}")
+                continue
 
-    # Debug information
-    if not text:
-        raise RuntimeError(f"Morningstar returned an empty response for {msid}")
+            text = resp.text.strip()
 
-    if text.startswith("<"):
-        return text
+            if not text:
+                print(f"[{key}] Empty response")
+                continue
 
-    raise RuntimeError(
-        f"Unexpected response for {msid}\n"
-        f"Content-Type: {resp.headers.get('Content-Type')}\n\n"
-        f"{text[:500]}"
-    )
+            if text.startswith("<"):
+                print(f"Using Morningstar key: {key}")
+                return text
 
+            print(f"[{key}] Unexpected response:")
+            print(text[:300])
+
+        except Exception as e:
+            last_error = e
+            print(f"[{key}] {e}")
+
+    if last_error:
+        raise RuntimeError(
+            f"No Morningstar key worked for {msid}. Last error: {last_error}"
+        )
+
+    raise RuntimeError(f"No Morningstar key worked for {msid}")
 
 def parse_fund_analytics(xml_text: str) -> dict:
     """Estrae i blocchi analitici di un fondo dall'XML security_details.
