@@ -31,7 +31,7 @@ _MORNINGSTAR_KEYS = [
 
 _BASE_URL_TEMPLATE = (
     "https://tools.morningstar.it/api/rest.svc/security_details/{key}"
-    "?id={msid}&idtype=msid&responseViewFormat=json&viewid=snapshot"
+    "?id={security_id}&idtype={id_type}&responseViewFormat=xml&viewid={view_id}"
     "&currencyId=EUR&languageId=it-IT"
 )
 
@@ -74,47 +74,54 @@ BOND_STYLEBOX_COLS = ["Ltd", "Mod", "Ext"]           # sensibilità ai tassi
 # -----------------------------------------------------------------------------
 # Fetch e parsing per singolo fondo
 # -----------------------------------------------------------------------------
-def fetch_security_details_xml(msid: str, timeout: int = 30) -> str:
+def fetch_security_details_xml(security_id: str, timeout: int = 30, id_type: str = "ISIN") -> str:
     last_error = None
 
     for key in _MORNINGSTAR_KEYS:
-        url = _BASE_URL_TEMPLATE.format(key=key, msid=msid)
+        for view_id in ("snapshot", "MFsnapshot"):
+            for current_id_type in (id_type, "Morningstar", "msid"):
+                url = _BASE_URL_TEMPLATE.format(
+                    key=key,
+                    security_id=security_id,
+                    id_type=current_id_type,
+                    view_id=view_id,
+                )
 
-        try:
-            resp = requests.get(
-                url,
-                headers=_HEADERS,
-                timeout=timeout,
-                allow_redirects=True,
-            )
+                try:
+                    resp = requests.get(
+                        url,
+                        headers=_HEADERS,
+                        timeout=timeout,
+                        allow_redirects=True,
+                    )
 
-            if resp.status_code != 200:
-                print(f"[{key}] HTTP {resp.status_code}")
-                continue
+                    if resp.status_code != 200:
+                        print(f"[{key} {current_id_type} {view_id}] HTTP {resp.status_code}")
+                        continue
 
-            text = resp.text.strip()
+                    text = resp.text.strip().lstrip("\ufeff")
 
-            if not text:
-                print(f"[{key}] Empty response")
-                continue
+                    if not text:
+                        print(f"[{key} {current_id_type} {view_id}] Empty response")
+                        continue
 
-            if text.startswith("<"):
-                print(f"Using Morningstar key: {key}")
-                return text
+                    if text.startswith("<"):
+                        print(f"Using Morningstar key: {key} ({current_id_type}/{view_id})")
+                        return text
 
-            print(f"[{key}] Unexpected response:")
-            print(text[:300])
+                    print(f"[{key} {current_id_type} {view_id}] Unexpected response:")
+                    print(text[:300])
 
-        except Exception as e:
-            last_error = e
-            print(f"[{key}] {e}")
+                except Exception as e:
+                    last_error = e
+                    print(f"[{key} {current_id_type} {view_id}] {e}")
 
     if last_error:
         raise RuntimeError(
-            f"No Morningstar key worked for {msid}. Last error: {last_error}"
+            f"No Morningstar key worked for {security_id}. Last error: {last_error}"
         )
 
-    raise RuntimeError(f"No Morningstar key worked for {msid}")
+    raise RuntimeError(f"No Morningstar key worked for {security_id}")
 
 def parse_fund_analytics(xml_text: str) -> dict:
     """Estrae i blocchi analitici di un fondo dall'XML security_details.
