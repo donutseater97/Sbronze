@@ -41,6 +41,7 @@ FUND_COLORS: dict[str, str] = {}
 # CARICAMENTO DATI — Fondi e transazioni dai CSV
 # =============================================================================
 
+@st.cache_data(ttl=300, show_spinner=False)
 def load_funds_and_transactions() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Carica fondi e transazioni dai rispettivi file CSV.
 
@@ -71,7 +72,8 @@ def load_funds_and_transactions() -> tuple[pd.DataFrame, pd.DataFrame]:
     return funds, transactions
 
 
-def load_historical_prices(funds_df: pd.DataFrame) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def load_historical_prices(_funds_df: pd.DataFrame) -> pd.DataFrame:
     """Carica i prezzi storici dal file historical_data.csv generato da GitHub Actions.
 
     Il CSV contiene una colonna 'Date' e una colonna per ogni fondo con il
@@ -79,7 +81,7 @@ def load_historical_prices(funds_df: pd.DataFrame) -> pd.DataFrame:
     per coerenza con il resto dell'app.
 
     Args:
-        funds_df: DataFrame dei fondi (per il mapping Ticker → Fund).
+        _funds_df: DataFrame dei fondi (per il mapping Ticker → Fund).
 
     Returns:
         DataFrame con colonna 'date' (datetime) e una colonna per fondo.
@@ -112,7 +114,7 @@ def load_historical_prices(funds_df: pd.DataFrame) -> pd.DataFrame:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
     # Rinomina colonne ticker → nome fondo (es. "0P0001CRXW.F" → "US")
-    for _, row in funds_df.iterrows():
+    for _, row in _funds_df.iterrows():
         ticker = row["Ticker"]
         fund_name = row["Fund"]
         yahoo_col = f"{ticker}.F"

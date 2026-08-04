@@ -6,7 +6,7 @@ dei singoli fondi e del portafoglio in generale.
 """
 
 import streamlit as st
-from utils.privacy import fmt_eur, privacy_on
+from utils.privacy import fmt_eur, privacy_on, render_page_header, normalize_spark
 import pandas as pd
 
 from config import FUND_COLORS
@@ -26,7 +26,7 @@ def daily_dashboard(
         hist_data_global: DataFrame prezzi storici (colonna 'date' + fondi).
         last_date_str:    Data più recente dei dati storici.
     """
-    st.header(f"📋 Daily Dashboard — {last_date_str}")
+    render_page_header(f"📋 Daily Dashboard — {last_date_str}")
 
     if len(transactions) == 0:
         st.info("No transactions yet. Add some transactions to see your dashboard.")
@@ -110,7 +110,7 @@ def daily_dashboard(
         delta=None if privacy_on() else f"{portfolio_pnl_pct:+.2f}%",
         delta_color="off",
         border=True,
-        chart_data=portfolio_pnl_spark,
+        chart_data=normalize_spark(portfolio_pnl_spark),
         chart_type="bar",
     )
 
@@ -192,6 +192,6 @@ def daily_dashboard(
                 delta=None if privacy_on() else f"{fund_pnl_pct:+.2f}%",
                 delta_color="off",
                 border=True,
-                chart_data=fund_pnl_spark,
+                chart_data=normalize_spark(fund_pnl_spark),
                 chart_type="bar",
             )

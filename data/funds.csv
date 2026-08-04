@@ -1,7 +1,7 @@
-Fund,Ticker,ISIN,Fund Name,Type,Colour
-US,0P0001CRXW,LU0281484963,JPMorgan Funds - Us Select Equity Plus Fund D Acc - Eur,Equity,#FF0000
-EU,0P00006DA4,LU0261952682,Fidelity Funds - Euro 50 Index Fund A-acc-eur,Equity,#0066FF
-EM,0P0001722W,LU1321847805,Blackrock Strategic Funds - Emerging Markets Equity Strategies Fund E2 Eur,Equity,#00FF00
-Tech,0P00015OFP,LU1213836080,Fidelity Funds - Global Technology Fund A-Acc-EUR,Equity,#999999
-EU HY,0P00000AV2,LU0086177085,Ubs (lux) Bond Fund - Euro High Yield (eur) P-acc,Bond,#00CCFF
-Me A Ee,0P0001QEPX,LU2539333562,JPMorgan Funds - Middle East Africa and Emerging Europe Opportunities Fund A Acc EUR,Equity,#CC00FF
+Fund,Ticker,ISIN,Fund Name,Type,Colour,URL
+US,0P0001CRXW,LU0281484963,JPMorgan Funds - Us Select Equity Plus Fund D Acc - Eur,Equity,#FF0000,https://am.jpmorgan.com/it/it/asset-management/adv/products/jpm-us-select-equity-plus-d-acc-eur-lu0281484963
+EU,0P00006DA4,LU0261952682,Fidelity Funds - Euro 50 Index Fund A-acc-eur,Equity,#0066FF,https://www.fidelity-italia.it/factsheet/LU0261952682
+EM,0P0001722W,LU1321847805,Blackrock Strategic Funds - Emerging Markets Equity Strategies Fund E2 Eur,Equity,#00FF00,https://www.blackrock.com/it/consulenti/products/280749/bsf-blackrock-emerging-markets-equity-strategies-e2-eur
+Tech,0P00015OFP,LU1213836080,Fidelity Funds - Global Technology Fund A-Acc-EUR,Equity,#999999,https://www.fidelity-italia.it/factsheet/LU1213836080
+EU HY,0P00000AV2,LU0086177085,Ubs (lux) Bond Fund - Euro High Yield (eur) P-acc,Bond,#00CCFF,https://www.ubs.com/it/it/assetmanagement/funds/asset-class/lu0086177085-ubs-euro-high-yield-bond-fund-eur-p-acc-pd001.html
+Me A Ee,0P0001QEPX,LU2539333562,JPMorgan Funds - Middle East Africa and Emerging Europe Opportunities Fund A Acc EUR,Equity,#CC00FF,https://am.jpmorgan.com/it/it/asset-management/adv/products/jpm-middle-east-africa-and-emerging-europe-opportunities-a-acc-eur-lu2539333562

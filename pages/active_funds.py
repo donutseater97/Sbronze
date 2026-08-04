@@ -6,6 +6,7 @@ Mostra la lista dei fondi attivi con le relative informazioni
 """
 
 import streamlit as st
+from utils.privacy import render_page_header
 import pandas as pd
 
 from config import FUND_COLORS
@@ -18,14 +19,17 @@ def active_funds(funds: pd.DataFrame):
     Args:
         funds: DataFrame dei fondi con colonne Fund, Ticker, ISIN, Fund Name, Type, Colour.
     """
-    st.header("📋 Active Funds")
+    render_page_header("📋 Active Funds")
 
     if len(funds) == 0:
         st.info("No funds added yet")
         return
 
-    # Seleziona colonne da mostrare
-    display_funds = funds[["Fund", "Ticker", "ISIN", "Fund Name", "Type"]].copy()
+    # Seleziona colonne da mostrare (URL incluso se presente in funds.csv)
+    base_cols = ["Fund", "Ticker", "ISIN", "Fund Name", "Type"]
+    has_url = "URL" in funds.columns
+    cols = base_cols + (["URL"] if has_url else [])
+    display_funds = funds[cols].copy()
 
     # Colonna helper per styling
     display_funds["_fund_type"] = funds["Fund"].values
@@ -45,9 +49,15 @@ def active_funds(funds: pd.DataFrame):
 
     styled_funds = display_funds.style.apply(style_fund_rows, axis=1)
 
+    column_config = {"_fund_type": None}
+    if has_url:
+        column_config["URL"] = st.column_config.LinkColumn(
+            "URL", display_text="Official page ↗"
+        )
+
     st.dataframe(
         styled_funds,
         width="stretch",
         hide_index=True,
-        column_config={"_fund_type": None},
+        column_config=column_config,
     )

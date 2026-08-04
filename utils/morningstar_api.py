@@ -218,12 +218,29 @@ def aggregate_portfolio(per_fund: dict[str, dict], weights: dict[str, float]) ->
             continue
         h = h.copy()
         h["Fund"] = fund
+        # Weighting = peso % del titolo DENTRO il fondo (0..100)
+        # PortfolioWeight = peso % del titolo sul portafoglio totale
         h["PortfolioWeight"] = (weights.get(fund, 0.0) / total) * h["Weighting"]
         frames.append(h)
     if frames:
         allh = pd.concat(frames, ignore_index=True)
         # Unisce lo stesso titolo detenuto da più fondi (chiave: ISIN, poi nome)
         allh["_key"] = allh["ISIN"].fillna(allh["SecurityName"])
+
+        # Dettaglio per-fondo: lista di (fund, fund_weight%, portfolio_weight%)
+        # per ciascun titolo, usato dall'accordion nella pagina.
+        def _breakdown(group):
+            return [
+                {
+                    "fund": r["Fund"],
+                    "fund_weight": round(float(r["Weighting"]), 4),
+                    "portfolio_weight": round(float(r["PortfolioWeight"]), 4),
+                }
+                for _, r in group.sort_values("PortfolioWeight", ascending=False).iterrows()
+            ]
+
+        breakdowns = allh.groupby("_key").apply(_breakdown, include_groups=False)
+
         merged = (
             allh.groupby("_key", as_index=False)
             .agg(
@@ -234,7 +251,10 @@ def aggregate_portfolio(per_fund: dict[str, dict], weights: dict[str, float]) ->
                 PortfolioWeight=("PortfolioWeight", "sum"),
                 Funds=("Fund", lambda s: ", ".join(sorted(set(s)))),
             )
-            .sort_values("PortfolioWeight", ascending=False)
+        )
+        merged["Breakdown"] = merged["_key"].map(breakdowns)
+        merged = (
+            merged.sort_values("PortfolioWeight", ascending=False)
             .reset_index(drop=True)
         )
         agg["holdings"] = merged

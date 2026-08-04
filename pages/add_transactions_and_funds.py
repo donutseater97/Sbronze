@@ -112,7 +112,8 @@ def add_transactions_and_funds(
             with col2:
                 ticker = st.text_input("Ticker", placeholder="e.g., 0P0001CRXW")
                 colour = st.color_picker("Colour", value="#C00000")
-
+                fund_url = st.text_input("Official page URL (optional)",
+                                         placeholder="https://...")
             submitted = st.form_submit_button("Add Fund")
             if submitted:
                 # Validazione
@@ -128,6 +129,7 @@ def add_transactions_and_funds(
                     new_fund = pd.DataFrame([{
                         "Fund": fund_cat, "Ticker": ticker, "ISIN": isin,
                         "Fund Name": name, "Type": fund_type, "Colour": colour,
+                        "URL": fund_url or "",
                     }])
                     funds = pd.concat([funds, new_fund], ignore_index=True)
                     funds.to_csv(FUNDS_FILE, index=False)

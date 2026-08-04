@@ -8,7 +8,7 @@ Mostra la cronologia completa delle transazioni con:
 """
 
 import streamlit as st
-from utils.privacy import privacy_on, fmt_eur, MASK, MASK_PLAIN
+from utils.privacy import privacy_on, fmt_eur, MASK, MASK_PLAIN, render_page_header
 import pandas as pd
 
 from config import FUND_COLORS
@@ -36,7 +36,7 @@ def transaction_history(
         hist_data_global: DataFrame prezzi storici.
         last_date_str:    Data più recente dei dati storici.
     """
-    st.header("📜 Transaction History")
+    render_page_header("📜 Transaction History")
 
     # ===== FILTRO FONDI =====
     fund_list = funds["Fund"].tolist() if len(funds) > 0 else []

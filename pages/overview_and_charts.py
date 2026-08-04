@@ -22,7 +22,7 @@ from components.chart_helpers import (
     RANGE_SELECTOR_BUTTONS_SHORT,
 )
 from utils.formatting import count_decimals, format_qty
-from utils.privacy import privacy_on, fmt_eur, mask_text, render_privacy_toggle, MASK, MASK_PLAIN
+from utils.privacy import privacy_on, fmt_eur, mask_text, render_page_header, MASK, MASK_PLAIN, normalize_spark
 
 
 def overview_and_charts(
@@ -41,8 +41,7 @@ def overview_and_charts(
     """
 
     # ===== HEADER =====
-    st.header(f"📈 Portfolio Summary as of {last_date_str}")
-    render_privacy_toggle()
+    render_page_header(f"📈 Portfolio Summary as of {last_date_str}")
 
     # ===== FILTRO FONDI =====
     fund_list = funds["Fund"].tolist() if len(funds) > 0 else []
@@ -164,20 +163,42 @@ def overview_and_charts(
         + "%)"
     )
 
-    # MoM performance
-    df["month"] = df["Date"].dt.to_period("M")
-    current_month = df["month"].max()
-    prev_month = current_month - 1
-    mom_performance = {}
-    for fund in summary["Fund"]:
-        fund_df = df[df["Fund"] == fund]
-        cur_price = fund_df[fund_df["month"] == current_month]["Price (€)"].mean()
-        prv_price = fund_df[fund_df["month"] == prev_month]["Price (€)"].mean()
-        if pd.notna(prv_price) and prv_price > 0 and pd.notna(cur_price):
-            mom_performance[fund] = (cur_price - prv_price) / prv_price * 100
+    # ----- Performance MoM / YTD / YoY (basata sui NAV, non sui prezzi d'acquisto) -----
+    # Nota logica: la vecchia "MoM" confrontava la media dei PREZZI D'ACQUISTO tra
+    # due mesi, che riflette quando/quanto hai comprato, non la performance del
+    # fondo. Qui usiamo i NAV storici: variazione % del NAV del fondo sul periodo,
+    # cioè la vera performance di prezzo (MoM = ultimo mese, YTD = da inizio anno,
+    # YoY = ultimi 12 mesi).
+    def _nav_perf(months=None, ytd=False):
+        """Ritorna {fund: perf%} dal NAV: da N mesi fa (o da inizio anno) a oggi."""
+        out = {}
+        if len(hist_data) == 0 or "date" not in hist_data.columns:
+            return {f: 0.0 for f in summary["Fund"]}
+        h = hist_data.sort_values("date")
+        last_date = pd.to_datetime(h["date"]).max()
+        if ytd:
+            ref_date = pd.Timestamp(year=last_date.year, month=1, day=1)
         else:
-            mom_performance[fund] = 0.0
-    summary["MoM performance (%)"] = summary["Fund"].map(mom_performance).round(2)
+            ref_date = last_date - pd.DateOffset(months=months)
+        # NAV più recente <= ref_date (asof) per ciascun fondo
+        for fund in summary["Fund"]:
+            if fund not in h.columns:
+                out[fund] = 0.0
+                continue
+            s = pd.to_numeric(h[fund], errors="coerce")
+            valid = h.loc[s.notna(), ["date"]].assign(v=s[s.notna()].values)
+            if valid.empty:
+                out[fund] = 0.0
+                continue
+            cur = valid.iloc[-1]["v"]
+            past = valid[valid["date"] <= ref_date]
+            base = past.iloc[-1]["v"] if not past.empty else valid.iloc[0]["v"]
+            out[fund] = round((cur / base - 1.0) * 100.0, 2) if base else 0.0
+        return out
+
+    summary["MoM performance (%)"] = summary["Fund"].map(_nav_perf(months=1)).fillna(0.0)
+    summary["YTD performance (%)"] = summary["Fund"].map(_nav_perf(ytd=True)).fillna(0.0)
+    summary["YoY performance (%)"] = summary["Fund"].map(_nav_perf(months=12)).fillna(0.0)
 
     # Peso per Market Value
     total_market_value = summary["Market Value (€)"].sum()
@@ -191,11 +212,14 @@ def overview_and_charts(
     summary = summary.sort_values("fund_order").reset_index(drop=True)
 
     # ===== TABELLA SUMMARY =====
+    # Ordine colonne richiesto: gross contr, net invested, market value, latest
+    # price, average nav, quantity, fees, return, net return, mom, ytd, yoy, weight.
     display_summary = summary[[
-        "Fund", "Gross Contributions (€)", "Net Invested (€)", "Fees (€)",
-        "Latest Price (€)", "Average NAV (€)", "Quantity", "Market Value (€)",
+        "Fund", "Gross Contributions (€)", "Net Invested (€)", "Market Value (€)",
+        "Latest Price (€)", "Average NAV (€)", "Quantity", "Fees (€)",
         "Total Return [€ (%)]", "Net Return [€ (%)]",
-        "MoM performance (%)", "Weight (Mkt Value)",
+        "MoM performance (%)", "YTD performance (%)", "YoY performance (%)",
+        "Weight (Mkt Value)",
     ]].copy()
 
     display_summary = display_summary.rename(
@@ -216,6 +240,8 @@ def overview_and_charts(
     display_summary["_Total_Return_raw"] = summary["Total Return (€)"]
     display_summary["_Net_Return_raw"] = summary["Net Return (€)"]
     display_summary["_MoM_raw"] = summary["MoM performance (%)"]
+    display_summary["_YTD_raw"] = summary["YTD performance (%)"]
+    display_summary["_YoY_raw"] = summary["YoY performance (%)"]
 
     # Formattazione colonne €
     for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
@@ -243,22 +269,22 @@ def overview_and_charts(
         return fmt_eur(float(mv)) if pd.notna(mv) else fmt_eur(0.0)
 
     display_summary["Market Value (€)"] = display_summary.apply(_fmt_mv_row, axis=1)
-    display_summary["MoM performance (%)"] = display_summary["MoM performance (%)"].apply(
-        lambda x: f"{x:.2f}%"
-    )
+    for _perf_col in ["MoM performance (%)", "YTD performance (%)", "YoY performance (%)"]:
+        display_summary[_perf_col] = display_summary[_perf_col].apply(lambda x: f"{x:.2f}%")
     display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(
         lambda x: f"{x:.2f}%"
     )
 
     # Lookup per colorazione
     raw_values = (
-        display_summary[["Fund", "_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"]]
+        display_summary[["Fund", "_Total_Return_raw", "_Net_Return_raw",
+                         "_MoM_raw", "_YTD_raw", "_YoY_raw"]]
         .set_index("Fund")
     )
 
     # Rimuovi colonne helper
     display_summary = display_summary.drop(
-        columns=["_Total_Return_raw", "_Net_Return_raw", "_MoM_raw"]
+        columns=["_Total_Return_raw", "_Net_Return_raw", "_MoM_raw", "_YTD_raw", "_YoY_raw"]
     )
 
     # ----- Stile tabella -----
@@ -268,6 +294,8 @@ def overview_and_charts(
         tr_raw = raw_values.loc[fund_name, "_Total_Return_raw"]
         nr_raw = raw_values.loc[fund_name, "_Net_Return_raw"]
         mom_raw = raw_values.loc[fund_name, "_MoM_raw"]
+        ytd_raw = raw_values.loc[fund_name, "_YTD_raw"]
+        yoy_raw = raw_values.loc[fund_name, "_YoY_raw"]
 
         styles = []
         for col in row.index:
@@ -281,6 +309,12 @@ def overview_and_charts(
                 styles.append(bg)
             elif col == "MoM performance (%)":
                 bg = "background-color: rgba(46,160,67,0.15);" if mom_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
+                styles.append(bg)
+            elif col == "YTD performance (%)":
+                bg = "background-color: rgba(46,160,67,0.15);" if ytd_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
+                styles.append(bg)
+            elif col == "YoY performance (%)":
+                bg = "background-color: rgba(46,160,67,0.15);" if yoy_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
                 styles.append(bg)
             else:
                 styles.append("")
@@ -370,40 +404,103 @@ def overview_and_charts(
             spark_gross.append(txs_up_to["Gross Contribution (theor)"].sum() if len(txs_up_to) > 0 else 0.0)
             spark_fees.append(txs_up_to["Fees (€)"].sum() if len(txs_up_to) > 0 else 0.0)
 
+    # Sparkline YoY: performance % del portafoglio a 12 mesi, calcolata per
+    # ciascuno degli ultimi SPARK_DAYS giorni. Per ogni giorno d: confronta il
+    # MV "a prezzi di d" con il MV "a prezzi di d-12m" sulle stesse quote,
+    # così la sparkline mostra l'andamento della performance annua, non gli euro.
+    spark_yoy = []
+    if len(hist_data) > 0 and "date" in hist_data.columns:
+        h_all = hist_data.sort_values("date").copy()
+        h_all["date"] = pd.to_datetime(h_all["date"])
+        price_idx = h_all.set_index("date")
+        spark_dates_yoy = h_all.tail(SPARK_DAYS)["date"].tolist()
+        # quote correnti per fondo (totali) — la performance NAV non dipende dalle
+        # date di acquisto, quindi usiamo le quote possedute oggi come pesi.
+        qty_now = {f: tx_sorted_sp[tx_sorted_sp["Fund"] == f]["Quantity"].sum()
+                   for f in filter_funds}
+        for d in spark_dates_yoy:
+            d_past = d - pd.DateOffset(months=12)
+            mv_now = mv_past = 0.0
+            for f in filter_funds:
+                if f not in price_idx.columns:
+                    continue
+                q = qty_now.get(f, 0.0)
+                if q <= 0:
+                    continue
+                s = pd.to_numeric(price_idx[f], errors="coerce").dropna()
+                if s.empty:
+                    continue
+                p_now = s[s.index <= d]
+                p_past = s[s.index <= d_past]
+                if p_now.empty:
+                    continue
+                cur_p = p_now.iloc[-1]
+                base_p = p_past.iloc[-1] if not p_past.empty else s.iloc[0]
+                mv_now += q * cur_p
+                mv_past += q * base_p
+            spark_yoy.append((mv_now / mv_past - 1.0) * 100.0 if mv_past > 0 else 0.0)
+
     # Placeholder per sparkline vuote (stessa altezza)
     _empty_spark = [0] * max(len(spark_mv), 1)
 
+    # Portfolio-level YoY: weighted by current market value of each fund
+    mv_by_fund = summary.set_index("Fund")["Market Value (€)"]
+    yoy_by_fund = summary.set_index("Fund")["YoY performance (%)"]
+    _mv_tot = mv_by_fund.sum()
+    portfolio_yoy = (
+        float((mv_by_fund * yoy_by_fund).sum() / _mv_tot) if _mv_tot > 0 else 0.0
+    )
+
+    # Daily P/L — calcolo diretto da dati storici e quantità
+    daily_pnl_eur = 0.0
+    daily_pnl_prev_mv = 0.0
+    if len(hist_data) > 0 and "date" in hist_data.columns:
+        hist_desc = hist_data.sort_values("date", ascending=False)
+        tx_sorted_pnl = transactions.copy()
+        tx_sorted_pnl["Date"] = pd.to_datetime(tx_sorted_pnl["Date"], errors="coerce")
+        tx_sorted_pnl = tx_sorted_pnl.dropna(subset=["Date"]).sort_values("Date")
+        for fund in filter_funds:
+            if fund not in hist_desc.columns:
+                continue
+            s = pd.to_numeric(hist_desc[fund], errors="coerce")
+            if len(s) < 2 or pd.isna(s.iloc[0]) or pd.isna(s.iloc[1]):
+                continue
+            fund_qty = tx_sorted_pnl[tx_sorted_pnl["Fund"] == fund]["Quantity"].sum()
+            price_change = float(s.iloc[0]) - float(s.iloc[1])
+            daily_pnl_eur += fund_qty * price_change
+            daily_pnl_prev_mv += fund_qty * float(s.iloc[1])
+    daily_pnl_pct = (daily_pnl_eur / daily_pnl_prev_mv * 100) if daily_pnl_prev_mv > 0 else 0.0
+    _pct_sign = "+" if daily_pnl_pct > 0 else ""
+
+    # Nascondi i valori assoluti € nei tooltip delle sparkline delle metric card:
+    # le sparkline monetarie vengono indicizzate (base 100), mantenendo la forma
+    # ma mostrando all'hover un numero adimensionale invece dei tuoi euro reali.
+    # spark_yoy è già una serie in % → lasciata invariata.
+    spark_return = normalize_spark(spark_return)
+    spark_net_return = normalize_spark(spark_net_return)
+    spark_daily_pnl = normalize_spark(spark_daily_pnl)
+    spark_gross = normalize_spark(spark_gross)
+    spark_mv = normalize_spark(spark_mv)
+
+    # Riga 1: Total Return | Total Net Return | Daily P/L
     row1c1, row1c2, row1c3 = st.columns(3)
     with row1c1:
-        st.metric("Total Return", fmt_eur(total_return), delta=f"{total_return_pct:+.2f}%", delta_color="normal", border=True,
+        st.metric("Total Return", fmt_eur(total_return),
+                  delta=None if privacy_on() else f"{total_return_pct:+.2f}%",
+                  delta_color="normal", border=True,
                   chart_data=spark_return if spark_return else _empty_spark, chart_type="line")
     with row1c2:
-        st.metric("Total Net Return", fmt_eur(total_net_return), delta=f"{total_net_return_pct:+.2f}%", delta_color="normal", border=True,
+        st.metric("Total Net Return", fmt_eur(total_net_return),
+                  delta=None if privacy_on() else f"{total_net_return_pct:+.2f}%",
+                  delta_color="normal", border=True,
                   chart_data=spark_net_return if spark_net_return else _empty_spark, chart_type="line")
     with row1c3:
-        # Daily P/L — calcolo diretto da dati storici e quantità
-        daily_pnl_eur = 0.0
-        daily_pnl_prev_mv = 0.0
-        if len(hist_data) > 0 and "date" in hist_data.columns:
-            hist_desc = hist_data.sort_values("date", ascending=False)
-            tx_sorted_pnl = transactions.copy()
-            tx_sorted_pnl["Date"] = pd.to_datetime(tx_sorted_pnl["Date"], errors="coerce")
-            tx_sorted_pnl = tx_sorted_pnl.dropna(subset=["Date"]).sort_values("Date")
-            for fund in filter_funds:
-                if fund not in hist_desc.columns:
-                    continue
-                s = pd.to_numeric(hist_desc[fund], errors="coerce")
-                if len(s) < 2 or pd.isna(s.iloc[0]) or pd.isna(s.iloc[1]):
-                    continue
-                fund_qty = tx_sorted_pnl[tx_sorted_pnl["Fund"] == fund]["Quantity"].sum()
-                price_change = float(s.iloc[0]) - float(s.iloc[1])
-                daily_pnl_eur += fund_qty * price_change
-                daily_pnl_prev_mv += fund_qty * float(s.iloc[1])
-        daily_pnl_pct = (daily_pnl_eur / daily_pnl_prev_mv * 100) if daily_pnl_prev_mv > 0 else 0.0
-        pct_sign = "+" if daily_pnl_pct > 0 else ""
-        st.metric("Daily P/L", fmt_eur(daily_pnl_eur, "€ {:+,.2f}"), delta=f"{pct_sign}{daily_pnl_pct:.2f}%", delta_color="normal", border=True,
+        st.metric("Daily P/L", fmt_eur(daily_pnl_eur, "€ {:+,.2f}"),
+                  delta=None if privacy_on() else f"{_pct_sign}{daily_pnl_pct:.2f}%",
+                  delta_color="normal", border=True,
                   chart_data=spark_daily_pnl if spark_daily_pnl else _empty_spark, chart_type="bar")
 
+    # Riga 2: Total Gross Contributions | Total Market Value | YoY performance
     row2c1, row2c2, row2c3 = st.columns(3)
     with row2c1:
         st.metric("Total Gross Contributions", fmt_eur(total_gross), border=True,
@@ -412,8 +509,9 @@ def overview_and_charts(
         st.metric("Total Market Value", fmt_eur(total_market_value), border=True,
                   chart_data=spark_mv if spark_mv else _empty_spark, chart_type="line")
     with row2c3:
-        st.metric("Total Fees", fmt_eur(total_fees), border=True,
-                  chart_data=spark_fees if spark_fees else _empty_spark, chart_type="line")
+        st.metric("YoY performance", f"{portfolio_yoy:+.2f}%",
+                  delta_color="off", border=True,
+                  chart_data=spark_yoy if spark_yoy else _empty_spark, chart_type="line")
 
     # ===== GRAFICI =====
     st.divider()
@@ -427,6 +525,46 @@ def overview_and_charts(
 # =============================================================================
 # SOTTO-FUNZIONI GRAFICI (private)
 # =============================================================================
+
+def _market_value_timeseries(df_sorted, hist_data_local):
+    """Serie temporale del market value di portafoglio, vettorizzata.
+
+    Per ogni fondo costruisce le quote cumulate nel tempo, le riallinea alle
+    date dei prezzi storici (forward-fill), poi MV = Σ(quote × prezzo) come
+    operazione matriciale. Sostituisce il vecchio doppio loop O(date×fondi×tx).
+    """
+    if hist_data_local is None or len(hist_data_local) == 0 or "date" not in hist_data_local.columns:
+        return pd.DataFrame()
+
+    price = hist_data_local.copy()
+    price["date"] = pd.to_datetime(price["date"], errors="coerce")
+    price = price.dropna(subset=["date"]).sort_values("date").set_index("date")
+
+    funds_in_tx = [f for f in df_sorted["Fund"].unique() if f in price.columns]
+    if not funds_in_tx:
+        return pd.DataFrame()
+
+    # Quote cumulate per fondo sulle date delle transazioni, riallineate
+    # (asof/ffill) alla griglia delle date dei prezzi.
+    qty_cum = (
+        df_sorted.groupby(["date_dt", "Fund"])["Quantity"].sum()
+        .unstack(fill_value=0.0)
+        .sort_index()
+        .cumsum()
+    )
+    qty_cum = qty_cum.reindex(columns=funds_in_tx, fill_value=0.0)
+    # Riallinea sulle date prezzo: ffill delle quote possedute
+    qty_on_price_dates = qty_cum.reindex(
+        qty_cum.index.union(price.index)
+    ).ffill().reindex(price.index).fillna(0.0)
+
+    prices_num = price[funds_in_tx].apply(pd.to_numeric, errors="coerce")
+    mv = (qty_on_price_dates[funds_in_tx] * prices_num).sum(axis=1, skipna=True)
+    mv = mv[mv > 0]
+    if mv.empty:
+        return pd.DataFrame()
+    return pd.DataFrame({"date": mv.index, "market_value": mv.values})
+
 
 def _render_evolution_and_allocation(df, funds, hist_data):
     """Renderizza Investment Evolution e Allocation Pies affiancati."""
@@ -453,24 +591,11 @@ def _render_evolution_and_allocation(df, funds, hist_data):
         stair_values.append(row["Gross Contribution"])
     stair_df = pd.DataFrame({"date_dt": stair_dates, "Gross Contribution": stair_values})
 
-    # Market Value nel tempo
+    # Market Value nel tempo — versione vettorizzata e cache-ata.
+    # (Il vecchio doppio loop su ~7000 date × fondi × transazioni era la causa
+    # principale della lentezza della pagina.)
     hist_data_local = load_historical_prices(funds)
-    market_value_by_date = []
-    if len(hist_data_local) > 0 and "date" in hist_data_local.columns:
-        for hist_date in sorted(hist_data_local["date"].unique()):
-            tx_up = df_sorted[df_sorted["date_dt"] <= hist_date]
-            if len(tx_up) == 0:
-                continue
-            mv = 0.0
-            for fund in tx_up["Fund"].unique():
-                qty = tx_up[tx_up["Fund"] == fund]["Quantity"].sum()
-                if fund in hist_data_local.columns:
-                    price_row = hist_data_local[hist_data_local["date"] == hist_date][fund]
-                    if len(price_row) > 0 and pd.notna(price_row.iloc[0]):
-                        mv += qty * price_row.iloc[0]
-            if mv > 0:
-                market_value_by_date.append({"date": hist_date, "market_value": mv})
-    market_value_df = pd.DataFrame(market_value_by_date) if market_value_by_date else pd.DataFrame()
+    market_value_df = _market_value_timeseries(df_sorted, hist_data_local)
 
     # Estendi linea contributi fino all'ultima data storica
     if len(hist_data_local) > 0 and "date" in hist_data_local.columns and len(stair_df) > 0:

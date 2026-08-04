@@ -11,7 +11,7 @@ Mostra i grafici storici dei prezzi NAV per ciascun fondo con:
 
 import os
 import streamlit as st
-from utils.privacy import privacy_on
+from utils.privacy import privacy_on, render_page_header
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -65,7 +65,7 @@ def historical_prices(
         hist_data_global: DataFrame prezzi storici.
         yahoo_tickers:    Lista ticker Yahoo Finance (non usata direttamente, per debug).
     """
-    st.header("📈 Historical Data Charts")
+    render_page_header("📈 Historical Data Charts")
 
     # ----- Bottone ricarica dati da disco -----
     if "force_refresh" not in st.session_state:
@@ -199,21 +199,31 @@ def historical_prices(
         st.info("Select at least one fund")
         return
 
-    # ----- Average NAV per fondo (dal range selezionato) -----
+    # ----- Average NAV per fondo (FISSO, su TUTTE le transazioni) -----
+    # Bug precedente: veniva calcolato solo sulle transazioni dentro il range
+    # di date selezionato, quindi la linea si spostava cambiando intervallo.
+    # L'average NAV è invece il prezzo medio di carico e NON dipende dalla
+    # finestra visualizzata. Usiamo la stessa formula della pagina Overview:
+    # (contributi lordi teorici - commissioni) / quantità, su tutto lo storico.
     avg_nav_by_fund = {}
-    tx_range = transactions.copy()
-    tx_range["Date"] = pd.to_datetime(tx_range.get("Date"), errors="coerce")
-    tx_range = tx_range.dropna(subset=["Date"])
-    tx_range = tx_range[
-        (tx_range["Date"] >= pd.to_datetime(start_d))
-        & (tx_range["Date"] <= pd.to_datetime(end_d))
-    ]
-    if len(tx_range) > 0:
-        tx_range["Gross Contribution"] = tx_range["Quantity"] * tx_range["Price (€)"] + tx_range["Fees (€)"]
-        grouped = tx_range.groupby("Fund").agg({"Gross Contribution": "sum", "Quantity": "sum"})
+    tx_all = transactions.copy()
+    tx_all["Date"] = pd.to_datetime(tx_all.get("Date"), errors="coerce")
+    tx_all = tx_all.dropna(subset=["Date"])
+    if len(tx_all) > 0:
+        tx_all["Gross Contribution (real)"] = (
+            tx_all["Quantity"] * tx_all["Price (€)"] + tx_all["Fees (€)"]
+        )
+        tx_all["Gross Contribution (theor)"] = (
+            (tx_all["Gross Contribution (real)"] / 10).round() * 10
+        )
+        grouped = tx_all.groupby("Fund").agg(
+            gross=("Gross Contribution (theor)", "sum"),
+            fees=("Fees (€)", "sum"),
+            qty=("Quantity", "sum"),
+        )
         for fund, row in grouped.iterrows():
-            if row["Quantity"] and row["Quantity"] != 0:
-                avg_nav_by_fund[fund] = row["Gross Contribution"] / row["Quantity"]
+            if row["qty"] and row["qty"] != 0:
+                avg_nav_by_fund[fund] = (row["gross"] - row["fees"]) / row["qty"]
 
     # ===== RENDERING GRAFICO =====
     if st.session_state.hist_view_mode == "combined":
@@ -244,6 +254,14 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
     """
     n_funds = len(selected_funds)
     n_rows = 1 + n_funds  # riga 1 = % return, righe 2..N+1 = singoli fondi
+
+    # Controllo altezza: il combinato parte 3× più alto della versione compatta
+    # e l'utente può ridimensionare lo spazio verticale occupato dal grafico.
+    height_mult = st.slider(
+        "Chart height", min_value=1.0, max_value=5.0, value=1.5, step=0.5,
+        help="Vertical size of the combined chart.",
+        key="hist_combined_height_mult",
+    )
 
     # Altezze relative: primo pannello leggermente più grande dei singoli
     row_heights = [1.3] + [1.0] * n_funds
@@ -431,20 +449,67 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         )
 
     # ------------------------------------------------------------------
+    # DATI PER IL CROSSHAIR JS (linea unica su tutti i subplot)
+    # ------------------------------------------------------------------
+    # I native spike/hover di Plotly non riescono a disegnare UNA linea verticale
+    # che attraversi subplot impilati (ognuno ha il proprio dominio Y). Come fa
+    # investing.com, disegniamo il crosshair via JS: al plotly_hover tracciamo
+    # una linea a piena altezza (yref="paper") e un'unica etichetta con i valori
+    # di tutti i fondi alla data puntata. Qui prepariamo solo i dati.
+    import numpy as _np
+    hub_dates = plot_df.sort_values("date")["date"]
+    date_keys = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in hub_dates]
+    # Per ogni data: label HTML con tutti i fondi (NAV + %), colori inclusi.
+    per_date_rows = {dk: [] for dk in date_keys}
+    fund_series = {}
+    for fund in selected_funds:
+        s = pd.to_numeric(plot_df.set_index("date")[fund], errors="coerce").reindex(hub_dates.values)
+        base = s.dropna().iloc[0] if s.notna().any() else None
+        pct = (s / base - 1.0) * 100.0 if base is not None else s * 0
+        fund_series[fund] = (s.values, pct.values)
+    for i, dk in enumerate(date_keys):
+        for fund in selected_funds:
+            nav, pct = fund_series[fund]
+            color = FUND_COLORS.get(fund, "#999999")
+            navv, pctv = nav[i], pct[i]
+            if pd.isna(navv):
+                continue
+            if privacy_on():
+                txt = f"{fund}: {pctv:+.2f}%"
+            else:
+                txt = f"{fund}: €{navv:.2f} ({pctv:+.2f}%)"
+            per_date_rows[dk].append(f'<span style="color:{color}">●</span> {txt}')
+    # Mappa data -> blocco HTML del tooltip
+    crosshair_labels = {
+        dk: (f'<b>{dk}</b><br>' + "<br>".join(rows)) for dk, rows in per_date_rows.items()
+    }
+
+    # ------------------------------------------------------------------
     # LAYOUT
     # ------------------------------------------------------------------
-    # Altezza compatta: tutti i pannelli devono stare in una sola pagina
-    total_height = 180 + 105 * n_funds
+    # Tema coerente con la pagina (config.toml): sfondo #0d1117, testo #e6edf3.
+    _PAGE_BG = "#0d1117"
+    _PAGE_TEXT = "#e6edf3"
+    _GRID = "rgba(230,237,243,0.08)"
+    total_height = int((180 + 105 * n_funds) * height_mult)
     fig.update_layout(
         height=total_height,
-        hovermode="x unified",
-        template="plotly_white",
+        hovermode="x",
+        template="plotly_dark",
+        paper_bgcolor=_PAGE_BG,
+        plot_bgcolor=_PAGE_BG,
+        font=dict(family="sans-serif", color=_PAGE_TEXT, size=12),
         showlegend=False,
         dragmode="pan",
         uirevision="hist_combined_stacked",
         newshape=dict(line_color="#888888"),
         margin=dict(r=36, t=30, b=10, l=50),
+        spikedistance=-1,
+        hoverdistance=100,
     )
+    # Griglia e assi in tinta scura coerente con lo sfondo pagina
+    fig.update_xaxes(gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID)
+    fig.update_yaxes(gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID)
 
     # Asse Y primo pannello (senza titolo)
     fig.update_yaxes(
@@ -452,24 +517,26 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         row=1,
         col=1,
         fixedrange=False,
-        showspikes=True,
-        spikemode="across",
+        showspikes=False,
         automargin=True,
         zeroline=True,
         zerolinecolor="rgba(150,150,150,0.3)",
     )
 
-    # Asse Y per i singoli fondi (senza titolo)
-    for i in range(n_funds):
-        fig.update_yaxes(
-            title_text="",
-            row=i + 2,
-            col=1,
-            fixedrange=False,
-            showspikes=True,
-            spikemode="across",
-            automargin=True,
-        )
+    # Asse Y per i singoli fondi: range basato SOLO sul NAV del fondo nel range
+    # temporale selezionato (min/max), ignorando la linea Avg NAV (che può stare
+    # molto fuori scala e comprimerebbe la lettura del prezzo).
+    _mask = (plot_df["date"] >= pd.to_datetime(start_d)) & (plot_df["date"] <= pd.to_datetime(end_d))
+    _interval = plot_df[_mask] if _mask.any() else plot_df
+    for i, fund in enumerate(selected_funds):
+        s = pd.to_numeric(_interval[fund], errors="coerce").dropna()
+        cfg_y = dict(title_text="", fixedrange=False, showspikes=False, automargin=True)
+        if len(s) > 0:
+            lo, hi = float(s.min()), float(s.max())
+            pad = (hi - lo) * 0.08 if hi > lo else max(abs(hi) * 0.02, 0.5)
+            cfg_y["range"] = [lo - pad, hi + pad]
+            cfg_y["autorange"] = False
+        fig.update_yaxes(row=i + 2, col=1, **cfg_y)
 
     # --- Linee separatrici orizzontali tra i sotto-grafici ---
     # Calcola le posizioni Y (in coordinate paper) dei bordi inferiori di ogni subplot
@@ -497,27 +564,36 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
         x_padding = pd.Timedelta(days=2)
     x_max_display = x_max + x_padding
 
-    # Rangeslider e rangeselector sull'ultimo asse X (in basso).
     # Il range del rangeslider è vincolato al filtro date della pagina
     # (start_d / end_d), esattamente come nella vista grid.
     bottom_xaxis_key = f"xaxis{n_rows}" if n_rows > 1 else "xaxis"
-    fig.update_layout(**{
-        bottom_xaxis_key: dict(
-            range=[x_min, x_max_display],
-            rangeslider=dict(visible=True, thickness=0.04, range=[x_min, x_max]),
-            rangeselector=dict(buttons=RANGE_SELECTOR_BUTTONS),
-            showspikes=True,
-            spikemode="across",
-            spikesnap="cursor",
-            spikethickness=1,
-            spikecolor="#888888",
-        )
-    })
 
-    # Range esplicito anche sugli altri assi X (condivisi ma serve per autorange)
-    for r in range(1, n_rows):
+    # Range su tutti gli assi X (assi già "matched" con shared_xaxes). In
+    # hovermode "x unified" la linea verticale attraversa i subplot da sola,
+    # quindi non servono spike manuali (che confliggerebbero).
+    for r in range(1, n_rows + 1):
         xaxis_key = "xaxis" if r == 1 else f"xaxis{r}"
-        fig.update_layout(**{xaxis_key: dict(range=[x_min, x_max_display])})
+        cfg = dict(range=[x_min, x_max_display])
+        if xaxis_key == "xaxis":
+            # Rangeselector (1M/3M/... All) ancorato in ALTO, sopra il pannello
+            # % Return, così non si sovrappone all'ultimo grafico in basso.
+            cfg.update(
+                rangeselector=dict(
+                    buttons=RANGE_SELECTOR_BUTTONS,
+                    x=0, xanchor="left", y=1.0, yanchor="bottom",
+                    bgcolor="rgba(230,237,243,0.06)",
+                    bordercolor="rgba(230,237,243,0.2)",
+                    borderwidth=1,
+                    font=dict(color=_PAGE_TEXT, size=11),
+                    activecolor="rgba(88,166,255,0.5)",
+                ),
+            )
+        if xaxis_key == bottom_xaxis_key:
+            # Rangeslider (mini-mappa) resta in basso.
+            cfg.update(
+                rangeslider=dict(visible=True, thickness=0.04, range=[x_min, x_max]),
+            )
+        fig.update_layout(**{xaxis_key: cfg})
 
     # Stile titoli subplot (più piccoli, colore tenue).
     # IMPORTANTE: modificare SOLO le annotazioni-titolo dei subplot (xref="paper"),
@@ -528,7 +604,146 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
             ann.x = 0.01
             ann.xanchor = "left"
 
-    st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("historical_combined"))
+    # Nessuna traccia mostra il tooltip nativo: il crosshair JS fornisce l'unica
+    # etichetta consolidata. Le tracce devono comunque emettere plotly_hover
+    # (hoverinfo="none": evento sì, box nativo no). Le date delle transazioni
+    # sono già incluse nell'etichetta del crosshair.
+    for tr in fig.data:
+        tr.hoverinfo = "none"
+        tr.hovertemplate = None
+
+    # ------------------------------------------------------------------
+    # RENDER con crosshair JS a piena altezza (come investing.com)
+    # ------------------------------------------------------------------
+    import json
+    import uuid as _uuid
+    import streamlit.components.v1 as _components
+    from plotly.utils import PlotlyJSONEncoder
+
+    fig_json = json.dumps(fig, cls=PlotlyJSONEncoder)
+    labels_json = json.dumps(crosshair_labels)
+    div_id = "hist_combined_" + _uuid.uuid4().hex[:8]
+    cfg = get_plotly_config("historical_combined")
+    cfg_json = json.dumps(cfg)
+
+    html = f"""
+<style>
+  html, body {{
+    margin:0; padding:0;
+    background:{_PAGE_BG};
+    font-family: sans-serif;
+    color:{_PAGE_TEXT};
+  }}
+  #wrap_{div_id} {{ position:relative; background:{_PAGE_BG}; }}
+  #wrap_{div_id}:fullscreen {{ background:{_PAGE_BG}; padding:8px; }}
+</style>
+<div id="wrap_{div_id}">
+  <div id="{div_id}" style="width:100%;"></div>
+</div>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(function() {{
+  const fig = {fig_json};
+  const labels = {labels_json};
+  const gd = document.getElementById("{div_id}");
+  const wrap = document.getElementById("wrap_{div_id}");
+
+  // Bottone Full screen NATIVO nella modebar di Plotly (SVG icona espansione).
+  const fsButton = {{
+    name: "Full screen",
+    title: "Toggle full screen",
+    icon: {{
+      width: 1000, height: 1000,
+      path: "M150 150 L400 150 L400 250 L250 250 L250 400 L150 400 Z "
+          + "M850 150 L850 400 L750 400 L750 250 L600 250 L600 150 Z "
+          + "M150 850 L150 600 L250 600 L250 750 L400 750 L400 850 Z "
+          + "M850 850 L600 850 L600 750 L750 750 L750 600 L850 600 Z",
+    }},
+    click: function() {{
+      if (!document.fullscreenElement) {{
+        (wrap.requestFullscreen || wrap.webkitRequestFullscreen
+          || wrap.msRequestFullscreen).call(wrap);
+      }} else {{
+        (document.exitFullscreen || document.webkitExitFullscreen
+          || document.msExitFullscreen).call(document);
+      }}
+    }},
+  }};
+  const cfg = Object.assign(
+    {{responsive:true, displaylogo:false}},
+    {cfg_json},
+    {{modeBarButtonsToAdd: [fsButton].concat(({cfg_json}.modeBarButtonsToAdd)||[])}}
+  );
+
+  document.addEventListener("fullscreenchange", function() {{
+    setTimeout(function() {{ Plotly.Plots.resize(gd); }}, 100);
+  }});
+
+  Plotly.newPlot(gd, fig.data, fig.layout, cfg).then(function() {{
+    // Contenitore linea verticale + etichetta (overlay HTML sopra il grafico)
+    gd.style.position = "relative";
+    const vline = document.createElement("div");
+    vline.style.cssText = "position:absolute;top:0;bottom:0;width:1px;"
+      + "background:rgba(200,200,200,0.7);pointer-events:none;display:none;z-index:5;";
+    gd.appendChild(vline);
+    const tip = document.createElement("div");
+    tip.style.cssText = "position:absolute;pointer-events:none;display:none;z-index:6;"
+      + "background:rgba(20,20,20,0.94);border:1px solid rgba(150,150,150,0.5);"
+      + "border-radius:4px;padding:6px 9px;font-size:12px;color:#eee;"
+      + "font-family:sans-serif;white-space:nowrap;line-height:1.5;";
+    gd.appendChild(tip);
+
+    function fmtDate(x) {{
+      // x può essere ms o stringa; normalizza a YYYY-MM-DD
+      const d = new Date(x);
+      if (!isNaN(d)) {{
+        return d.toISOString().slice(0,10);
+      }}
+      return String(x).slice(0,10);
+    }}
+
+    gd.on("plotly_hover", function(ev) {{
+      if (!ev.points || !ev.points.length) return;
+      const pt = ev.points[0];
+      const key = fmtDate(pt.x);
+      const html = labels[key];
+      if (!html) return;
+      // Posizione X in pixel del PUNTO dati (allineamento perfetto con i dati):
+      // usa la conversione dell'asse X del primo subplot.
+      const xa = pt.xaxis;
+      const xpix = xa._offset + xa.d2p(pt.x);
+      // Estensione verticale: dall'alto del primo plot al fondo dell'ultimo.
+      const fullLayout = gd._fullLayout;
+      const yTop = fullLayout.yaxis._offset;
+      const yaxes = Object.keys(fullLayout).filter(k => /^yaxis\\d*$/.test(k))
+        .map(k => fullLayout[k]);
+      let yBottom = 0;
+      yaxes.forEach(ya => {{ yBottom = Math.max(yBottom, ya._offset + ya._length); }});
+      vline.style.left = xpix + "px";
+      vline.style.top = yTop + "px";
+      vline.style.height = (yBottom - yTop) + "px";
+      vline.style.bottom = "auto";
+      vline.style.display = "block";
+      tip.innerHTML = html;
+      // Tooltip vicino al cursore, dentro i limiti del grafico
+      const bb = gd.getBoundingClientRect();
+      let tx = xpix + 14;
+      const ty = Math.max(8, (ev.event.clientY - bb.top) - 10);
+      tip.style.display = "block";
+      const tw = tip.offsetWidth;
+      if (tx + tw > gd.clientWidth) tx = xpix - tw - 14;
+      tip.style.left = tx + "px";
+      tip.style.top = ty + "px";
+    }});
+    gd.on("plotly_unhover", function() {{
+      vline.style.display = "none";
+      tip.style.display = "none";
+    }});
+  }});
+}})();
+</script>
+"""
+    _components.html(html, height=total_height + 10, scrolling=False)
 
 
 def _render_grid_view(plot_df, selected_funds, avg_nav_by_fund, transactions, start_d, end_d):
@@ -610,7 +825,15 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
                            else "%{text}<extra></extra>"), text=hover_texts, showlegend=False,
         ))
 
-    y_min, y_max = calculate_y_range_with_padding(fig.data)
+    # Range Y basato SOLO sul NAV del fondo nel range visualizzato (min/max),
+    # ignorando la linea Avg NAV e i marker (che sposterebbero la scala).
+    _s = pd.to_numeric(fund_df[fund], errors="coerce").dropna()
+    if len(_s) > 0:
+        lo, hi = float(_s.min()), float(_s.max())
+        pad = (hi - lo) * 0.08 if hi > lo else max(abs(hi) * 0.02, 0.5)
+        y_min, y_max = lo - pad, hi + pad
+    else:
+        y_min, y_max = None, None
 
     fig.update_layout(
         height=320, hovermode="x unified", template="plotly_white", showlegend=False,
@@ -659,6 +882,21 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
 
     historical_data_df["date"] = historical_data_df["date"].dt.strftime("%Y-%m-%d")
 
+    # La colorazione via pandas Styler è costosa a ogni interazione: limitiamo
+    # la finestra temporale (default 1M) e usiamo UNA sola passata di stile con
+    # COLORE DI SFONDO cella (verde/rosso) invece del colore font.
+    total_rows = len(historical_data_df)
+    win_opts = ["1M", "3M", "6M", "1Y", "Max"]
+    win_days = {"1M": 30, "3M": 91, "6M": 182, "1Y": 365, "Max": None}
+    choice = st.radio(
+        "Range", win_opts, index=0, horizontal=True,
+        help="Time window of rows to display (styled per-cell, so shorter is faster).",
+    )
+    days = win_days[choice]
+    n_rows = total_rows if days is None else min(days, total_rows)
+    historical_data_df = historical_data_df.head(n_rows)
+    st.caption(f"Showing {n_rows} of {total_rows} rows (most recent first).")
+
     # CSS per header colorati
     header_css = "<style>\ntable th { font-weight: 600 !important; }\n"
     header_css += "table th:first-child { background-color: rgba(100, 100, 100, 0.3) !important; }\n"
@@ -683,42 +921,35 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
     for col in selected_funds:
         display_df[col] = display_df[col].apply(lambda x: f"€{x:.2f}" if pd.notna(x) else "")
 
-    # Stile verde/rosso per variazione giornaliera
-    def _colorize(column):
-        col_name = column.name
-        if col_name == "date":
-            return [""] * len(display_df)
-        styles = []
-        for i in range(len(display_df)):
-            if i == len(display_df) - 1:
-                styles.append("")
-                continue
-            cur = historical_data_df[col_name].iloc[i]
-            prev = historical_data_df[col_name].iloc[i + 1]
-            if pd.isna(cur) or pd.isna(prev) or cur == prev:
-                styles.append("")
-            elif cur > prev:
-                styles.append("color: #6BCB77; font-weight: 600;")
-            else:
-                styles.append("color: #E26A6A; font-weight: 600;")
-        return styles
+    # Colore SFONDO cella (verde salita, rosso discesa) + evidenzia transazioni,
+    # in UNA sola passata per colonna (più veloce di due .apply separati).
+    _dates_list = display_df["date"].tolist()
 
-    # Evidenzia giorni di transazione
-    def _highlight_transactions(column):
+    def _style_col(column):
         col_name = column.name
         if col_name == "date":
             return [""] * len(display_df)
         tx_dates = tx_dates_by_fund.get(col_name, set())
-        return [
-            "background-color: rgba(180, 180, 180, 0.15);" if d in tx_dates else ""
-            for d in display_df["date"].tolist()
-        ]
+        raw = historical_data_df[col_name]
+        out = []
+        n = len(display_df)
+        for i in range(n):
+            base = ""
+            if i < n - 1:
+                cur = raw.iloc[i]
+                prev = raw.iloc[i + 1]
+                if pd.notna(cur) and pd.notna(prev) and cur != prev:
+                    if cur > prev:
+                        base = "background-color: rgba(46,160,67,0.28);"
+                    else:
+                        base = "background-color: rgba(248,81,73,0.28);"
+            # Bordo per i giorni di transazione (sovrapposto al colore variazione)
+            if _dates_list[i] in tx_dates:
+                base += "box-shadow: inset 0 0 0 2px rgba(230,237,243,0.55);"
+            out.append(base)
+        return out
 
-    styler = (
-        display_df.style
-        .apply(_colorize, subset=selected_funds, axis=0)
-        .apply(_highlight_transactions, subset=selected_funds, axis=0)
-    )
+    styler = display_df.style.apply(_style_col, subset=selected_funds, axis=0)
 
     display_df = display_df[["date"] + selected_funds]
     st.dataframe(styler, use_container_width=True)

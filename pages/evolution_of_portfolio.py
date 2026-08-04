@@ -9,7 +9,7 @@ Mostra l'evoluzione dettagliata del portafoglio:
 """
 
 import streamlit as st
-from utils.privacy import privacy_on, mask_text
+from utils.privacy import privacy_on, mask_text, render_page_header
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -35,7 +35,7 @@ def evolution_of_portfolio(
         transactions:     DataFrame delle transazioni.
         hist_data_global: DataFrame prezzi storici.
     """
-    st.header("📊 Evolution of Portfolio")
+    render_page_header("📊 Evolution of Portfolio")
 
     if len(transactions) == 0:
         st.info("No data available. Please add transactions.")
