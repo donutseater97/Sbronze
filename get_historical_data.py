@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime
 from io import BytesIO
+from urllib.parse import urljoin
 import xml.etree.ElementTree as ET
 
 from investgo import get_pair_id, get_historical_prices, get_info
@@ -227,12 +228,19 @@ def fetch_fidelity_nav(url, fund_name):
 
 def fetch_blackrock_nav(page_url, fund_name):
     print(f"DEBUG: Trying BlackRock source for {fund_name}")
-    page = requests.get(page_url, headers=_SESSION_HEADERS, timeout=30, allow_redirects=True)
-    page.raise_for_status()
-    match = re.search(r"https://www\.blackrock\.com/[^\"']+fileType=xls[^\"']+", page.text)
-    if not match:
-        raise RuntimeError(f"Could not find BlackRock download link for {fund_name}")
-    response = _download_bytes(match.group(0), headers={"Referer": page_url})
+    if "fileType=xls" in page_url:
+        download_url = page_url.replace("&amp;", "&")
+    else:
+        page = requests.get(page_url, headers=_SESSION_HEADERS, timeout=30, allow_redirects=True)
+        page.raise_for_status()
+        match = re.search(
+            r'<a[^>]+aria-label="Download data file"[^>]+href="([^"]+fileType=xls[^"]+)"',
+            page.text,
+        )
+        if not match:
+            raise RuntimeError(f"Could not find BlackRock download link for {fund_name}")
+        download_url = urljoin(page_url, match.group(1).replace("&amp;", "&"))
+    response = _download_bytes(download_url, headers={"Referer": page_url})
     hist = _load_nav_dataframe(response, fund_name, worksheet_name="Storico")
     fund_sources[fund_name] = "BlackRock"
     print(f"DEBUG: BlackRock source returned {len(hist)} rows for {fund_name}")
@@ -271,7 +279,7 @@ OFFICIAL_FUND_SOURCES = {
         fund_name,
     ),
     "EM": lambda fund_name: fetch_blackrock_nav(
-        "https://www.blackrock.com/it/consulenti/products/280749/bsf-blackrock-emerging-markets-equity-strategies-e2-eur#chartDialog",
+        "https://www.blackrock.com/it/consulenti/products/280749/bsf-blackrock-emerging-markets-equity-strategies-e2-eur/1538022822380.ajax?fileType=xls&fileName=BSF-Emerging-Markets-Equity-Strategies-Fund-Class-E2-EUR_fund&dataType=fund",
         fund_name,
     ),
     "EU HY": lambda fund_name: fetch_ubs_nav(
