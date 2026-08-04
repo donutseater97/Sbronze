@@ -1,113 +1,13 @@
-import os
-import re
-from datetime import datetime
-from io import BytesIO
-from urllib.parse import urljoin
-import xml.etree.ElementTree as ET
-
 from investgo import get_pair_id, get_historical_prices, get_info
 import requests
 import pandas as pd
 import numpy as np
+from datetime import datetime
+from io import BytesIO
 import warnings
+import os
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
-
-_SESSION_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
-}
-_SPREADSHEET_NS = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
-
-
-def _download_bytes(url, headers=None):
-    merged_headers = dict(_SESSION_HEADERS)
-    if headers:
-        merged_headers.update(headers)
-    response = requests.get(url, headers=merged_headers, timeout=30, allow_redirects=True)
-    response.raise_for_status()
-    return response
-
-
-def _read_spreadsheetml_workbook(content, worksheet_name=None):
-    cleaned = content.lstrip(b"\xef\xbb\xbf").lstrip(b"\xef\xbb\xbf")
-    root = ET.fromstring(cleaned)
-    worksheets = root.findall(".//ss:Worksheet", _SPREADSHEET_NS)
-    if not worksheets:
-        raise ValueError("SpreadsheetML workbook has no worksheets")
-
-    worksheet = None
-    if worksheet_name:
-        for candidate in worksheets:
-            if candidate.attrib.get("{urn:schemas-microsoft-com:office:spreadsheet}Name") == worksheet_name:
-                worksheet = candidate
-                break
-    if worksheet is None:
-        worksheet = worksheets[0]
-
-    rows = []
-    for row in worksheet.findall(".//ss:Row", _SPREADSHEET_NS):
-        values = []
-        for cell in row.findall("ss:Cell", _SPREADSHEET_NS):
-            data = cell.find("ss:Data", _SPREADSHEET_NS)
-            values.append(data.text if data is not None else None)
-        if any(value not in (None, "") for value in values):
-            rows.append(values)
-
-    if not rows:
-        return pd.DataFrame()
-
-    width = max(len(row) for row in rows)
-    padded = [row + [None] * (width - len(row)) for row in rows]
-    df = pd.DataFrame(padded)
-    df.columns = df.iloc[0]
-    return df.iloc[1:].reset_index(drop=True)
-
-
-def _normalize_nav_table(df, fund_name):
-    if df.empty:
-        raise ValueError(f"No NAV data found for {fund_name}")
-
-    lower_columns = {col: str(col).strip().lower() for col in df.columns}
-    date_col = next(
-        (
-            col
-            for col in df.columns
-            if any(token in lower_columns[col] for token in ("date", "al", "data", "enddate"))
-        ),
-        df.columns[0],
-    )
-    value_col = next(
-        (
-            col
-            for col in df.columns
-            if col != date_col and any(token in lower_columns[col] for token in ("nav", "value", "price", "close"))
-        ),
-        None,
-    )
-    if value_col is None:
-        value_col = next(col for col in df.columns if col != date_col)
-
-    out = df[[date_col, value_col]].copy()
-    out.columns = ["Date", fund_name]
-    out["Date"] = pd.to_datetime(out["Date"], errors="coerce", dayfirst=True)
-    out[fund_name] = pd.to_numeric(out[fund_name], errors="coerce").round(2)
-    out = out.dropna(subset=["Date", fund_name])
-    out["Date"] = out["Date"].dt.tz_localize("Europe/Rome").dt.tz_localize(None)
-    return out
-
-
-def _load_nav_dataframe(response, fund_name, worksheet_name=None):
-    content = response.content
-    is_spreadsheetml = content.lstrip(b"\xef\xbb\xbf").startswith(b"<?xml") or b"urn:schemas-microsoft-com:office:spreadsheet" in content[:500]
-    if is_spreadsheetml:
-        return _normalize_nav_table(_read_spreadsheetml_workbook(content, worksheet_name=worksheet_name), fund_name)
-
-    try:
-        df_raw = pd.read_excel(BytesIO(content), sheet_name=worksheet_name or 0)
-    except Exception:
-        df_raw = pd.read_excel(BytesIO(content))
-    return _normalize_nav_table(df_raw, fund_name)
 
 # Script purpose: collect historical NAV/price data for all tracked funds and
 # update the local CSV without overwriting previously stored history.
@@ -132,8 +32,8 @@ dfs = []
 # Track which source each fund came from in this run (InvestGo, Morningstar, JPMorgan)
 fund_sources = {}
 
-# 1. Fetch data for non-JPM funds with a ranked fallback chain.
-print("Fetching data from investgo, Morningstar, and official sources...")
+# 1. Fetch data for non-JPM funds using investgo, with Morningstar as fallback.
+print("Fetching data from investgo...")
 start_date = "01011990"  # earliest reasonable default
 end_date = datetime.now().strftime("%d%m%Y")
 print(f"DEBUG: Fetch window -> start: {start_date}, end: {end_date}")
@@ -160,164 +60,62 @@ def fetch_investgo(ticker, fund_name):
     return hist
 
 
-_MORNINGSTAR_KEYS = [
-    "jbyiq3rhyf",
-    "nen6ere626",
-    "t92wz0sj7c",
-]
-
-
-def fetch_morningstar(ticker, fund_name, isin=None):
+def fetch_morningstar(ticker, fund_name):
     print(f"DEBUG: Trying Morningstar fallback for {fund_name} (ticker={ticker})")
 
-    ids = [ticker]
-    if isin and isin not in ids:
-        ids.append(isin)
+    url = (
+        "https://tools.morningstar.it/api/rest.svc/timeseries_price/jbyiq3rhyf"
+        f"?id={ticker}]2]0]FOITA$$ALL&currencyId=EUR&idtype=Morningstar"
+        "&frequency=daily&startDate=1990-01-01&outputType=JSON"
+    )
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
-    for key in _MORNINGSTAR_KEYS:
-        for current_id in ids:
-            url = (
-                f"https://tools.morningstar.it/api/rest.svc/timeseries_price/{key}"
-                f"?id={current_id}]2]0]FOITA$$ALL&idtype=Morningstar"
-                "&currencyId=EUR&frequency=daily&startDate=1990-01-01&outputType=JSON"
-            )
+    r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
 
-            r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+    print("=" * 80)
+    print("URL:", r.url)
+    print("STATUS:", r.status_code)
+    print("CONTENT-TYPE:", r.headers.get("Content-Type"))
+    print("FIRST 1000 CHARS:")
+    print(r.text[:1000])
+    print("=" * 80)
 
-            print("=" * 80)
-            print("URL:", r.url)
-            print("STATUS:", r.status_code)
-            print("CONTENT-TYPE:", r.headers.get("Content-Type"))
-            print("FIRST 1000 CHARS:")
-            print(r.text[:1000])
-            print("=" * 80)
+    r.raise_for_status()
 
-            if r.status_code != 200:
-                continue
+    data = r.json()
 
-            try:
-                data = r.json()
-                detail = data["TimeSeries"]["Security"][0]["HistoryDetail"]
-            except Exception as exc:
-                print(f"DEBUG: Morningstar parse failed for {fund_name} with {key}/{current_id}: {exc}")
-                continue
+    detail = data["TimeSeries"]["Security"][0]["HistoryDetail"]
 
-            hist = pd.DataFrame(detail)[["EndDate", "Value"]]
-            hist.columns = ["Date", fund_name]
-            hist["Date"] = pd.to_datetime(hist["Date"])
-            hist[fund_name] = pd.to_numeric(hist[fund_name], errors="coerce").round(2)
-            hist = hist.dropna()
+    hist = pd.DataFrame(detail)[["EndDate", "Value"]]
+    hist.columns = ["Date", fund_name]
+    hist["Date"] = pd.to_datetime(hist["Date"])
+    hist[fund_name] = pd.to_numeric(hist[fund_name], errors="coerce").round(2)
+    hist = hist.dropna()
 
-            fund_sources[fund_name] = "Morningstar"
-            return hist
+    fund_sources[fund_name] = "Morningstar"
 
-    raise RuntimeError(f"Morningstar historical price fallback unavailable for {fund_name}")
-
-
-def fetch_fidelity_nav(url, fund_name):
-    print(f"DEBUG: Trying Fidelity source for {fund_name}")
-    response = _download_bytes(url)
-    hist = _load_nav_dataframe(response, fund_name)
-    fund_sources[fund_name] = "Fidelity"
     return hist
-
-
-def fetch_blackrock_nav(page_url, fund_name):
-    print(f"DEBUG: Trying BlackRock source for {fund_name}")
-    if "fileType=xls" in page_url:
-        download_url = page_url.replace("&amp;", "&")
-    else:
-        page = requests.get(page_url, headers=_SESSION_HEADERS, timeout=30, allow_redirects=True)
-        page.raise_for_status()
-        match = re.search(
-            r'<a[^>]+aria-label="Download data file"[^>]+href="([^"]+fileType=xls[^"]+)"',
-            page.text,
-        )
-        if not match:
-            raise RuntimeError(f"Could not find BlackRock download link for {fund_name}")
-        download_url = urljoin(page_url, match.group(1).replace("&amp;", "&"))
-    response = _download_bytes(download_url, headers={"Referer": page_url})
-    hist = _load_nav_dataframe(response, fund_name, worksheet_name="Storico")
-    fund_sources[fund_name] = "BlackRock"
-    print(f"DEBUG: BlackRock source returned {len(hist)} rows for {fund_name}")
-    return hist
-
-
-def fetch_ubs_nav(url, fund_name):
-    print(f"DEBUG: Trying UBS source for {fund_name}")
-    candidates = [
-        url,
-        url.replace("period=7%20giorni", "period=All"),
-        url.replace("period=7%20giorni", "period=all"),
-        url.replace("period=7%20giorni", "period=Dal%20lancio"),
-    ]
-    last_error = None
-    for candidate in candidates:
-        try:
-            response = _download_bytes(candidate)
-            hist = _load_nav_dataframe(response, fund_name)
-            fund_sources[fund_name] = "UBS"
-            print(f"DEBUG: UBS source returned {len(hist)} rows for {fund_name}")
-            return hist
-        except Exception as exc:
-            last_error = exc
-            print(f"DEBUG: UBS candidate failed for {fund_name}: {exc}")
-    raise RuntimeError(f"UBS source unavailable for {fund_name}: {last_error}")
-
-
-OFFICIAL_FUND_SOURCES = {
-    "EU": lambda fund_name: fetch_fidelity_nav(
-        "https://www.fidelity-italia.it/api/ce/fdh/HistoricalNav.xlsx?id=LU0261952682&countries=it&country=it&languages=it%2Cen&language=it&channels=ce.private-investor%2Cce.professional-investor&channel=ce.professional-investor&r=1784794788568",
-        fund_name,
-    ),
-    "Tech": lambda fund_name: fetch_fidelity_nav(
-        "https://www.fidelity-italia.it/api/ce/fdh/HistoricalNav.xlsx?id=LU1213836080&countries=it&country=it&languages=it%2Cen&language=it&channels=ce.private-investor%2Cce.professional-investor&channel=ce.professional-investor&r=1784794852605",
-        fund_name,
-    ),
-    "EM": lambda fund_name: fetch_blackrock_nav(
-        "https://www.blackrock.com/it/consulenti/products/280749/bsf-blackrock-emerging-markets-equity-strategies-e2-eur/1538022822380.ajax?fileType=xls&fileName=BSF-Emerging-Markets-Equity-Strategies-Fund-Class-E2-EUR_fund&dataType=fund",
-        fund_name,
-    ),
-    "EU HY": lambda fund_name: fetch_ubs_nav(
-        "https://www.ubs.com/app/HA4/api/api/price-services/358/downloadtoexcel?currency=EUR&period=7%20giorni&ssp=0&toDate=22.07.2026&fromDate=15.07.2026&locale=it_IT_RETL&sgmtKey=ubsf.emwh&profile_variant=&fileName=UBSFunds_Prices_",
-        fund_name,
-    ),
-}
-
-
-def fetch_official_source(fund_name):
-    source = OFFICIAL_FUND_SOURCES.get(fund_name)
-    if source is None:
-        raise KeyError(fund_name)
-    return source(fund_name)
 
 
 for _, row in investgo_funds.iterrows():
     fund_name = row["Fund"]
     ticker = row["Ticker"]
     print(f"DEBUG: Processing non-JPM fund -> {fund_name} (ticker={ticker})")
-    fetchers = [
-        ("investgo", lambda: fetch_investgo(ticker, fund_name)),
-        ("Morningstar", lambda: fetch_morningstar(ticker, fund_name, isin=row.get("ISIN"))),
-        ("official source", lambda: fetch_official_source(fund_name)),
-    ]
-    hist = None
-    last_error = None
-    for label, fetcher in fetchers:
+    try:
+        hist = fetch_investgo(ticker, fund_name)
+        dfs.append(hist)
+        print(f"✓ {fund_name}: {len(hist)} rows (investgo)")
+    except Exception as e:
+        print(f"✗ {fund_name} via investgo: {e} — trying Morningstar fallback...")
         try:
-            hist = fetcher()
+            hist = fetch_morningstar(ticker, fund_name)
             dfs.append(hist)
-            print(f"✓ {fund_name}: {len(hist)} rows ({label})")
-            break
-        except Exception as exc:
-            last_error = exc
-            print(f"✗ {fund_name} via {label}: {exc}")
-    if hist is None:
-        print(f"✗ {fund_name}: all non-JPM sources failed ({last_error})")
+            print(f"✓ {fund_name}: {len(hist)} rows (Morningstar fallback)")
+        except Exception as e2:
+            print(f"✗ {fund_name} via Morningstar: {e2}")
 
 # 2. Fetch JPMorgan funds from the JPMorgan AM API.
 print("\nFetching JPMorgan funds from JPMorgan API...")

@@ -29,9 +29,9 @@ from utils.morningstar_api import (
 # -----------------------------------------------------------------------------
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
-def _load_fund_analytics(security_id: str) -> dict:
+def _load_fund_analytics(msid: str) -> dict:
     """Scarica e interpreta i dati Morningstar per un singolo fondo (cached)."""
-    return parse_fund_analytics(fetch_security_details_xml(security_id, id_type="ISIN"))
+    return parse_fund_analytics(fetch_security_details_xml(msid))
 
 
 # -----------------------------------------------------------------------------
@@ -91,12 +91,11 @@ def morningstar_api_data(funds: pd.DataFrame, transactions: pd.DataFrame,
     failed: list[str] = []
     with st.spinner("Scarico i dati Morningstar per i fondi..."):
         for _, row in funds.iterrows():
-            fund = row["Fund"]
-            security_id = row["ISIN"] if pd.notna(row.get("ISIN")) else row["Ticker"]
-            if fund not in weights or pd.isna(security_id):
+            fund, msid = row["Fund"], row["Ticker"]
+            if fund not in weights or pd.isna(msid):
                 continue
             try:
-                per_fund[fund] = _load_fund_analytics(security_id)
+                per_fund[fund] = _load_fund_analytics(msid)
             except Exception as e:
                 failed.append(f"{fund}: {e}")
     if failed:
