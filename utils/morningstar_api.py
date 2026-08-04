@@ -23,19 +23,10 @@ import xml.etree.ElementTree as ET
 # Costanti API e mapping dei codici Morningstar
 # -----------------------------------------------------------------------------
 
-_MORNINGSTAR_KEYS = [
-    "jbyiq3rhyf",
-    "nen6ere626",
-    "t92wz0sj7c",
-]
-
-_BASE_URL_TEMPLATE = (
-    "https://tools.morningstar.it/api/rest.svc/security_details/{key}"
-    "?id={msid}&idtype=msid&responseViewFormat=json&viewid=snapshot"
-    "&currencyId=EUR&languageId=it-IT"
-)
-
-_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+# Il fetch dell'XML security_details è delegato a utils.nav_sources, che
+# gestisce l'host Morningstar live (lt.morningstar.com) e la rotazione dei
+# token pubblici. Vedi la nota storica in nav_sources.py sul motivo per cui
+# tools.morningstar.<paese> non funziona più.
 
 # GlobalStockSectorBreakdown → nomi settore (schema Morningstar a 11 settori)
 SECTOR_NAMES = {
@@ -75,46 +66,14 @@ BOND_STYLEBOX_COLS = ["Ltd", "Mod", "Ext"]           # sensibilità ai tassi
 # Fetch e parsing per singolo fondo
 # -----------------------------------------------------------------------------
 def fetch_security_details_xml(msid: str, timeout: int = 30) -> str:
-    last_error = None
+    """Scarica l'XML security_details per un Morningstar ID.
 
-    for key in _MORNINGSTAR_KEYS:
-        url = _BASE_URL_TEMPLATE.format(key=key, msid=msid)
+    Delega a utils.nav_sources.fetch_morningstar_details_xml, che prova host
+    e token pubblici in cascata sull'endpoint Morningstar live.
+    """
+    from utils.nav_sources import fetch_morningstar_details_xml
+    return fetch_morningstar_details_xml(msid, timeout=timeout)
 
-        try:
-            resp = requests.get(
-                url,
-                headers=_HEADERS,
-                timeout=timeout,
-                allow_redirects=True,
-            )
-
-            if resp.status_code != 200:
-                print(f"[{key}] HTTP {resp.status_code}")
-                continue
-
-            text = resp.text.strip()
-
-            if not text:
-                print(f"[{key}] Empty response")
-                continue
-
-            if text.startswith("<"):
-                print(f"Using Morningstar key: {key}")
-                return text
-
-            print(f"[{key}] Unexpected response:")
-            print(text[:300])
-
-        except Exception as e:
-            last_error = e
-            print(f"[{key}] {e}")
-
-    if last_error:
-        raise RuntimeError(
-            f"No Morningstar key worked for {msid}. Last error: {last_error}"
-        )
-
-    raise RuntimeError(f"No Morningstar key worked for {msid}")
 
 def parse_fund_analytics(xml_text: str) -> dict:
     """Estrae i blocchi analitici di un fondo dall'XML security_details.
