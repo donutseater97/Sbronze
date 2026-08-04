@@ -52,14 +52,15 @@ def render_privacy_toggle() -> None:
     _render_privacy_control(compact=False)
 
 def normalize_spark(values, base=100.0):
-    """Convert an absolute money series into an indexed series (base=100).
+    """Index a money sparkline to base=100 ONLY when privacy mode is active.
 
-    Metric-card sparklines (st.metric chart_data) show the raw value on hover,
-    which would leak absolute euro amounts. Indexing to a base keeps the exact
-    same shape but makes the hover value a small dimensionless number instead
-    of your real euro figure. Use for money sparklines; leave NAV/price
-    sparklines (public data) untouched.
+    Metric-card sparklines (st.metric chart_data) show the raw value on hover.
+    When privacy is on we index the series to a base so the hover reveals a
+    dimensionless number instead of real euros; when privacy is off we return
+    the original values unchanged, so the hover shows the correct amounts.
     """
+    if not privacy_on():
+        return values
     vals = [float(v) if v is not None else 0.0 for v in values]
     if not vals:
         return vals
@@ -70,40 +71,75 @@ def normalize_spark(values, base=100.0):
 
 
 def render_page_header(title: str) -> None:
-    """Render a page title with the privacy toggle aligned to the top-right.
+    """Render a page title with sign-in + privacy controls on the top-right.
 
-    The toggle state lives in st.session_state["privacy_mode"] (a non-widget
-    key) so it persists across pages. Call at the top of every page instead
-    of st.header(...).
+    The privacy and role state live in st.session_state (non-widget keys) so
+    they persist across pages. Call at the top of every page instead of
+    st.header(...).
     """
-    left, right = st.columns([5, 2], vertical_alignment="center")
+    left, mid, right = st.columns([5, 1.3, 1.3], vertical_alignment="center")
     with left:
         st.header(title)
+    with mid:
+        _render_role_control()
     with right:
         _render_privacy_control(compact=True)
 
 
+def _render_role_control() -> None:
+    """Sign-in popover: authenticate as admin or viewer (state is cross-page)."""
+    from config import check_role
+
+    role = st.session_state.get("role")
+    label = {"admin": "👤 Admin", "viewer": "👤 Viewer"}.get(role, "👤 Sign in")
+    with st.popover(label):
+        if role:
+            st.caption(f"Signed in as **{role}**.")
+            if st.button("Sign out", key="_role_signout"):
+                st.session_state.role = None
+                st.session_state.authenticated = False
+                st.rerun()
+        else:
+            st.caption("Admins can edit data and disable privacy mode; viewers "
+                       "can browse everything else.")
+            pwd = st.text_input("Password", type="password", key="_role_pwd")
+            if st.button("Sign in", key="_role_signin"):
+                r = check_role(pwd)
+                if r:
+                    st.session_state.role = r
+                    st.session_state.authenticated = (r == "admin")
+                    st.rerun()
+                else:
+                    st.error("Incorrect password")
+
+
 def _render_privacy_control(compact: bool = False) -> None:
-    """Shared privacy control: free activation, password-gated deactivation."""
-    from config import OWNER_PASSWORD  # import locale per evitare cicli
+    """Privacy control.
+
+    Any signed-in user (admin or viewer) can toggle privacy on/off freely.
+    Anonymous users can enable it, but disabling requires signing in first.
+    """
+    signed_in = st.session_state.get("role") in ("admin", "viewer")
 
     if not privacy_on():
         label = "🙈 Privacy" if compact else "🙈 Privacy mode — nascondi valori €"
         activated = st.toggle(
             label, value=False, key="_privacy_toggle_activate",
-            help=("Hide all portfolio amounts and quantities. Free to enable; "
-                  "disabling requires the admin password."),
+            help="Hide all portfolio amounts and quantities.",
         )
         if activated:
             st.session_state.privacy_mode = True
             st.rerun()
     else:
-        with st.popover("🙈 Privacy on"):
-            st.caption("Portfolio values are hidden.")
-            pwd = st.text_input("Admin password", type="password", key="_privacy_pwd")
-            if st.button("Disable", key="_privacy_pwd_btn"):
-                if pwd == OWNER_PASSWORD:
+        if signed_in:
+            # Utenti autenticati: disattivazione diretta, nessuna password.
+            with st.popover("🙈 Privacy on"):
+                st.caption("Portfolio values are hidden.")
+                if st.button("Reveal values", key="_privacy_reveal_btn"):
                     st.session_state.privacy_mode = False
                     st.rerun()
-                else:
-                    st.error("Wrong password")
+        else:
+            # Anonimi: devono prima autenticarsi (via il popover Sign in).
+            with st.popover("🙈 Privacy on"):
+                st.caption("Portfolio values are hidden. Sign in (top-left of "
+                           "this header) to reveal them.")

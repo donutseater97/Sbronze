@@ -13,6 +13,7 @@ background_gradient requires it).
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from datetime import datetime, date
 
 from components.chart_helpers import get_plotly_config
 from utils.privacy import fmt_eur, render_page_header
@@ -36,9 +37,87 @@ _SECTOR_PALETTE = [
 # Caching — one download per fund, reused for 6 hours
 # -----------------------------------------------------------------------------
 
+
+def _days_ago(date_str):
+    """Return integer days between date_str (YYYY-MM-DD) and today, or None."""
+    if not date_str:
+        return None
+    try:
+        d = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+        return (date.today() - d).days
+    except Exception:
+        return None
+
+
+def _render_data_freshness(funds: pd.DataFrame, per_fund: dict) -> None:
+    """Show how fresh each fund's Morningstar data is, and how it's sourced."""
+    rows = []
+    for fund in funds["Fund"]:
+        d = per_fund.get(fund)
+        if not d:
+            continue
+        fr = d.get("freshness", {}) or {}
+        pdate = fr.get("portfolio_date")
+        ndate = fr.get("nav_date")
+        prev = fr.get("prev_portfolio_date")
+        # Cadenza stimata dalla distanza tra le due date di composizione.
+        cadence = "—"
+        if pdate and prev:
+            try:
+                gap = (datetime.strptime(pdate[:10], "%Y-%m-%d")
+                       - datetime.strptime(prev[:10], "%Y-%m-%d")).days
+                cadence = "Monthly" if 20 <= gap <= 40 else f"~{gap}d"
+            except Exception:
+                pass
+        pago = _days_ago(pdate)
+        rows.append({
+            "Fund": fund,
+            "Holdings as of": pdate or "n/a",
+            "Age": f"{pago}d ago" if pago is not None else "—",
+            "Cadence": cadence,
+            "Latest NAV": ndate or "n/a",
+        })
+    if not rows:
+        return
+
+    # Sommario: la data di composizione più vecchia guida il "semaforo".
+    ages = [_days_ago(r["Holdings as of"]) for r in rows
+            if r["Holdings as of"] != "n/a"]
+    worst = max([a for a in ages if a is not None], default=None)
+    with st.expander("ℹ️ Data freshness & sourcing", expanded=False):
+        if worst is not None:
+            if worst <= 45:
+                st.success(f"Holdings composition is current "
+                           f"(latest data up to {worst} days old).")
+            elif worst <= 75:
+                st.warning(f"Holdings composition is up to {worst} days old — "
+                           "normal for monthly fund disclosures.")
+            else:
+                st.error(f"Holdings composition is up to {worst} days old — "
+                         "Morningstar may not have published a recent update.")
+        st.markdown(
+            "**How it works.** This page reads Morningstar's public "
+            "`security_details` endpoint (host `lt.morningstar.com`) live each "
+            "time you open it, cached for 6 hours. Two clocks matter: the "
+            "**holdings/sector composition**, which funds disclose on a "
+            "**monthly** cadence with a few weeks' lag, and the **latest NAV**, "
+            "which is typically daily. Percentages, style box and look-through "
+            "are built from the composition; the NAV date is the most recent "
+            "price Morningstar has on file."
+        )
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.caption("‘Holdings as of’ is the portfolio composition date reported "
+                   "by Morningstar; ‘Cadence’ is inferred from the gap to the "
+                   "previous composition date.")
+
+
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
-def _load_fund_analytics(msid: str) -> dict:
-    """Download and parse Morningstar analytics for a single fund (cached)."""
+def _load_fund_analytics(msid: str, _cache_version: int = 2) -> dict:
+    """Download and parse Morningstar analytics for a single fund (cached).
+
+    _cache_version bumps invalidate stale cached results after the parser's
+    output shape changes (e.g. the added `freshness` block).
+    """
     return parse_fund_analytics(fetch_security_details_xml(msid))
 
 
@@ -174,6 +253,9 @@ def morningstar_api_data(funds: pd.DataFrame, transactions: pd.DataFrame,
     if failed:
         parts.append(f"**Unavailable:** {', '.join(failed)}")
     st.info("  \n".join(parts))
+
+    # --- Data freshness ----------------------------------------------------
+    _render_data_freshness(funds, per_fund)
 
     # --- Overview ----------------------------------------------------------
     total_value = sum(active_weights.values())

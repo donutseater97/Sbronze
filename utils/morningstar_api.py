@@ -141,6 +141,29 @@ def parse_fund_analytics(xml_text: str) -> dict:
     out["holdings"] = holdings
     out["n_holdings_disclosed"] = len(holdings)
 
+    # --- Freschezza dei dati (date "as of" pubblicate da Morningstar) ---
+    # portfolio_date: data di composizione del portafoglio (holdings/settori),
+    #                 tipicamente aggiornata a cadenza MENSILE con qualche
+    #                 settimana di ritardo.
+    # nav_date:       data dell'ultimo NAV disponibile (di solito giornaliero).
+    # prev_portfolio_date: composizione precedente (per stimare la cadenza).
+    def _find_text(tag):
+        el = root.find(f".//{tag}")
+        return el.text if el is not None and el.text else None
+
+    port = root.find(".//Portfolio")
+    portfolio_date = None
+    if port is not None:
+        d = next(port.iter("Date"), None)
+        portfolio_date = d.text if d is not None and d.text else None
+    nav_el = root.find(".//NetAssetValue")
+    nav_date = nav_el.get("Date") if nav_el is not None else None
+    out["freshness"] = {
+        "portfolio_date": portfolio_date,                       # holdings/settori
+        "prev_portfolio_date": _find_text("PreviousPortfolioDate"),
+        "nav_date": nav_date,                                   # ultimo NAV
+    }
+
     return out
 
 

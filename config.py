@@ -151,8 +151,36 @@ GITHUB_TOKEN  = _get_secret("GITHUB_TOKEN")
 GITHUB_REPO   = _get_secret("GITHUB_REPO", "donutseater97/Sbronze")
 GITHUB_BRANCH = _get_secret("GITHUB_BRANCH", "main")
 
-# Password per l'area admin (add transactions / add funds)
-OWNER_PASSWORD = _get_secret("OWNER_PASSWORD")
+# Password per i ruoli utente.
+#   ADMIN_PASSWORD  -> accesso completo (può editare "Add Transactions & Funds"
+#                      e disattivare la privacy mode).
+#   VIEWER_PASSWORD -> tutto tranne l'editing di "Add Transactions & Funds".
+# OWNER_PASSWORD è mantenuto per retro-compatibilità: se ADMIN_PASSWORD non è
+# impostato, si usa OWNER_PASSWORD come password admin.
+OWNER_PASSWORD  = _get_secret("OWNER_PASSWORD")
+ADMIN_PASSWORD  = _get_secret("ADMIN_PASSWORD", OWNER_PASSWORD)
+VIEWER_PASSWORD = _get_secret("VIEWER_PASSWORD")
+
+# Passwords are read only from real secrets:
+#   - Streamlit Cloud: the app's Secrets manager (st.secrets).
+#   - Local (VS Code / Codespaces): .streamlit/secrets.toml, which is
+#     gitignored and therefore never committed or pushed. Only someone with
+#     that local file (i.e. you) can sign in locally.
+# There are NO hardcoded fallback passwords in the code, so the repo carries no
+# credentials and the source of trust is the secrets file alone.
+
+
+def check_role(password: str) -> str | None:
+    """Restituisce il ruolo per una password: 'admin', 'viewer' o None.
+
+    L'admin ha la precedenza: se una password combacia con entrambe (config
+    errata), viene trattata come admin.
+    """
+    if password and ADMIN_PASSWORD and password == ADMIN_PASSWORD:
+        return "admin"
+    if password and VIEWER_PASSWORD and password == VIEWER_PASSWORD:
+        return "viewer"
+    return None
 
 
 def github_get_file_sha(path: str) -> str | None:

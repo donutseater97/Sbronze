@@ -349,6 +349,16 @@ def overview_and_charts(
         tx_sorted_sp = transactions.copy()
         tx_sorted_sp["Date"] = pd.to_datetime(tx_sorted_sp["Date"], errors="coerce")
         tx_sorted_sp = tx_sorted_sp.dropna(subset=["Date"]).sort_values("Date")
+        # BUGFIX: la sparkline Total Return usava "Gross Contribution (theor)"
+        # che però NON esiste in `transactions` (è calcolata su `df`). Mancando,
+        # day_gross restava 0 e la sparkline Total Return mostrava il MARKET
+        # VALUE invece del rendimento. La ricreiamo qui.
+        tx_sorted_sp["Gross Contribution (real)"] = (
+            tx_sorted_sp["Quantity"] * tx_sorted_sp["Price (€)"] + tx_sorted_sp["Fees (€)"]
+        )
+        tx_sorted_sp["Gross Contribution (theor)"] = (
+            (tx_sorted_sp["Gross Contribution (real)"] / 10).round() * 10
+        )
 
         for i in range(len(spark_hist)):
             row_sp = spark_hist.iloc[i]

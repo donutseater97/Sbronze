@@ -51,9 +51,15 @@ st.title(f"📊 {APP_TITLE}")
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+# Ruolo utente: None (non autenticato), "viewer" o "admin".
+if "role" not in st.session_state:
+    st.session_state.role = None
+
 # Modalità privacy (oscura valori €) — attivabile dalla home solo se autenticati
 if "privacy_mode" not in st.session_state:
-    st.session_state.privacy_mode = False
+    # Privacy attiva di default: i valori € sono nascosti finché un admin non
+    # inserisce la password per disattivarla.
+    st.session_state.privacy_mode = True
 
 
 # =============================================================================

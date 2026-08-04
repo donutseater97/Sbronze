@@ -19,6 +19,7 @@ from config import (
     TRANSACTIONS_FILE,
     TRANSACTIONS_REPO_PATH,
     OWNER_PASSWORD,
+    check_role,
     GITHUB_TOKEN,
     GITHUB_REPO,
     github_put_file,
@@ -42,19 +43,31 @@ def add_transactions_and_funds(
         Tupla (funds_aggiornato, transactions_aggiornato).
     """
 
-    # ===== AUTENTICAZIONE =====
+    # ===== AUTENTICAZIONE (solo ADMIN) =====
+    # Questa pagina modifica i dati: richiede il ruolo admin. I viewer possono
+    # navigare tutto il resto ma non editare qui.
     st.subheader("🔐 Authentication")
-    if not st.session_state.authenticated:
-        pwd = st.text_input("Enter password to edit data:", type="password")
-        if pwd == OWNER_PASSWORD:
-            st.session_state.authenticated = True
-            st.rerun()
-        elif pwd:
-            st.error("Incorrect password")
-        st.info("Enter password to add transactions and funds")
+    if st.session_state.get("role") != "admin":
+        if st.session_state.get("role") == "viewer":
+            st.warning("You are signed in as **viewer**. Editing transactions and "
+                       "funds requires an **admin** password.")
+        pwd = st.text_input("Enter admin password to edit data:", type="password")
+        if pwd:
+            role = check_role(pwd)
+            if role == "admin":
+                st.session_state.authenticated = True
+                st.session_state.role = "admin"
+                st.rerun()
+            elif role == "viewer":
+                st.error("Viewer password accepted elsewhere, but this page "
+                         "requires the admin password.")
+            else:
+                st.error("Incorrect password")
+        else:
+            st.info("Enter the admin password to add transactions and funds")
         return funds, transactions
 
-    IS_OWNER = st.session_state.authenticated
+    IS_OWNER = st.session_state.get("role") == "admin"
 
     # ===== AGGIUNGI TRANSAZIONE =====
     st.header("💰 Add Transaction")
