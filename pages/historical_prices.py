@@ -935,16 +935,28 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
         n = len(display_df)
         for i in range(n):
             base = ""
+            is_tx = _dates_list[i] in tx_dates
             if i < n - 1:
                 cur = raw.iloc[i]
                 prev = raw.iloc[i + 1]
                 if pd.notna(cur) and pd.notna(prev) and cur != prev:
-                    if cur > prev:
-                        base = "background-color: rgba(46,160,67,0.28);"
+                    up = cur > prev
+                    # Palette tenue (come Transaction History, alpha 0.12) per la
+                    # variazione giornaliera; molto più forte (0.35) sui giorni di
+                    # transazione, per farli risaltare.
+                    alpha = 0.35 if is_tx else 0.12
+                    if up:
+                        base = f"background-color: rgba(46,160,67,{alpha});"
                     else:
-                        base = "background-color: rgba(248,81,73,0.28);"
+                        base = f"background-color: rgba(248,81,73,{alpha});"
+                elif is_tx:
+                    # Transazione in un giorno senza variazione di prezzo: evidenzia
+                    # comunque con un tono neutro forte.
+                    base = "background-color: rgba(230,237,243,0.14);"
+            elif is_tx:
+                base = "background-color: rgba(230,237,243,0.14);"
             # Bordo per i giorni di transazione (sovrapposto al colore variazione)
-            if _dates_list[i] in tx_dates:
+            if is_tx:
                 base += "box-shadow: inset 0 0 0 2px rgba(230,237,243,0.55);"
             out.append(base)
         return out
