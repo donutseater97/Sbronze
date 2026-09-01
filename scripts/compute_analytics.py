@@ -260,6 +260,22 @@ def main():
 
     # --- Pesi correnti + serie rolling ---
     weights = _current_weights(funds)
+    # Salva i tre schemi di pesi, così la pagina può farli scegliere all'utente
+    # senza ricalcolarli: market value (default), capitale investito, equal.
+    try:
+        tx = pd.read_csv(os.path.join(DATA_DIR, "transaction_history.csv"))
+        invested = tx.assign(inv=tx["Quantity"] * tx["Price (€)"]).groupby("Fund")["inv"].sum()
+        w_inv = {f: float(invested.get(f, 0.0)) for f in funds}
+        tot_inv = sum(w_inv.values())
+        w_inv = {f: (v / tot_inv if tot_inv > 0 else 0.0) for f, v in w_inv.items()}
+    except Exception:
+        w_inv = {f: 1.0 / len(funds) for f in funds}
+    w_eq = {f: 1.0 / len(funds) for f in funds}
+    pd.DataFrame({
+        "MarketValue": pd.Series(weights),
+        "Invested": pd.Series(w_inv),
+        "Equal": pd.Series(w_eq),
+    }).to_csv(os.path.join(OUT_DIR, "weights.csv"))
     pd.Series(weights, name="Weight").to_csv(os.path.join(OUT_DIR, "weights_current.csv"))
 
     vol_fund, vol_port, corr_avg, corr_pairs = _rolling_analytics(

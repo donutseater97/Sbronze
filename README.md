@@ -181,7 +181,7 @@ ordered ascending by date from the first common date across funds. Files:
 `corr_monthly.csv` (annualized covariance / correlation matrices);
 `rolling_vol_fund.csv`, `rolling_vol_portfolio.csv`, `rolling_corr_avg.csv`,
 `rolling_corr_pairs.csv` (90-day rolling series); `metrics_summary.csv`,
-`risk_contribution.csv`, `weights_current.csv`, `analytics_meta.csv`
+`risk_contribution.csv`, `weights.csv` (MarketValue/Invested/Equal), `weights_current.csv`, `analytics_meta.csv`
 (summary metrics, per-fund risk share, current weights, and freshness metadata).
 
 ---
@@ -250,25 +250,30 @@ The fund catalogue with a clickable `URL` link column to each official fund
 page.
 
 ### Portfolio Analysis (`portfolio_analysis.py`)
-A risk & correlation dashboard. It performs **no heavy computation** — it only
-reads the pre-computed CSVs from `data/analytics/`, so navigation stays fast.
-Sections:
+A risk & correlation dashboard. It reads the pre-computed CSVs from
+`data/analytics/`; a few controls recompute cheaply in-page from the
+pre-computed daily returns (risk-free rate, rolling window, weighting scheme).
+Every metric/section has an ℹ️ help icon with its definition. Sections, top to
+bottom:
 
-1. **Key metrics** — CAGR, annualized volatility, Sharpe, Sortino, and max
-   drawdown per fund and for the portfolio. A live risk-free-rate slider
-   rescales Sharpe/Sortino on the fly (cheap, recomputed from `returns_daily`).
-2. **Rolling evolution** (90-day window) — annualized volatility per fund plus
-   the portfolio line, and average pairwise correlation with optional specific
-   pairs overlaid.
-3. **Correlation matrix** — daily or monthly heatmap over the full common
-   history.
-4. **Risk contribution** — each fund's share of total portfolio risk
-   (marginal contribution × weight; sums to 100%).
-5. **Downloads** — a multiselect of every analytics series/matrix, each
-   exported as an individual XLSX via its own download button.
+0. **Downloads** — a one-line accordion that opens to a fieldset listing every
+   analytics file, each with its own "Download" link (XLSX). Tick checkboxes and
+   press "Download selected" to get a single ZIP of the chosen files.
+1. **Key metrics** — CAGR, annualized volatility, Sharpe, Sortino, max drawdown
+   per fund and portfolio. A risk-free slider and a weighting selector (Market
+   value / Invested capital / Equal) update the same table in place.
+2. **Portfolio composition & diversification** — weight pie for the chosen
+   scheme plus the diversification ratio (weighted-avg fund vol ÷ portfolio vol).
+3. **Rolling evolution** — annualized volatility per fund + portfolio and
+   average pairwise correlation, over a selectable window (30/60/90/120/180/252
+   days); specific pairs can be overlaid.
+4. **Correlation matrix** — daily or monthly heatmap over the full common history.
+5. **Risk contribution** — each fund's share of total portfolio risk under the
+   chosen weights (sums to 100%), shown against its weight.
 
-Everything on this page is euro-free (returns, ratios, correlations), so it is
-not affected by privacy mode.
+Everything here is euro-free, so privacy mode does not mask it. The weighting
+schemes come from `weights.csv` (MarketValue / Invested / Equal), written by the
+compute script.
 
 ### Add Transactions & Funds (`add_transactions_and_funds.py`)
 **Admin-only.** Forms to add transactions and funds; writes back to the CSVs
@@ -392,7 +397,7 @@ Method and conventions:
 - **Risk contribution** — `RCᵢ = wᵢ · (Σw)ᵢ / (wᵀΣw)`, summing to 100%.
 - **Weights** — default from current market value (quantity × latest NAV),
   consistent with the Overview page. Equal-weight / invested-capital variants
-  can be added later; the current weights are saved to `weights_current.csv`.
+  are all saved to `weights.csv` and selectable in the page; `weights_current.csv` keeps the market-value default.
 
 The Action commits `data/historical_data.csv`, `data/historical_sources.csv`,
 and `data/analytics/*.csv` together after each run.

@@ -220,6 +220,14 @@ def transaction_history(
             if _col in display_df.columns:
                 display_df[_col] = MASK_PLAIN
 
+    # Sposta le colonne P/L in fondo alla tabella (le helper "_..." restano dopo,
+    # ma sono nascoste dal column_config).
+    _visible = [c for c in display_df.columns if not c.startswith("_")]
+    _hidden = [c for c in display_df.columns if c.startswith("_")]
+    _pl = [c for c in ["P/L (€)", "P/L (%)"] if c in _visible]
+    _rest = [c for c in _visible if c not in _pl]
+    display_df = display_df[_rest + _pl + _hidden]
+
     styled_df = display_df.style.apply(style_fund_rows, axis=1)
 
     _col_config = {
