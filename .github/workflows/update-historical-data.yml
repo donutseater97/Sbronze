@@ -46,10 +46,14 @@ jobs:
         run: |
           python get_historical_data.py
 
+      - name: Compute portfolio analytics
+        run: |
+          python scripts/compute_analytics.py
+
       - name: Commit updated historical_data.csv
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'Auto-update data/historical_data.csv'
-          file_pattern: 'data/historical_data.csv'
+          commit_message: 'Auto-update historical data + analytics'
+          file_pattern: 'data/historical_data.csv data/historical_sources.csv data/analytics/*.csv'
         env:
           GITHUB_TOKEN: ${{ secrets.ACTIONS_PUSH_TOKEN || secrets.GITHUB_TOKEN }}

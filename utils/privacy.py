@@ -116,30 +116,33 @@ def _render_role_control() -> None:
 def _render_privacy_control(compact: bool = False) -> None:
     """Privacy control.
 
-    Any signed-in user (admin or viewer) can toggle privacy on/off freely.
-    Anonymous users can enable it, but disabling requires signing in first.
+    Signed-in users (admin or viewer) get a real single-click toggle that flips
+    privacy on/off in one click either way. Anonymous users can only enable it
+    (a one-way toggle); to reveal values they must sign in first.
     """
     signed_in = st.session_state.get("role") in ("admin", "viewer")
+    label = "🙈 Privacy" if compact else "🙈 Privacy mode — nascondi valori €"
 
-    if not privacy_on():
-        label = "🙈 Privacy" if compact else "🙈 Privacy mode — nascondi valori €"
-        activated = st.toggle(
-            label, value=False, key="_privacy_toggle_activate",
-            help="Hide all portfolio amounts and quantities.",
+    if signed_in:
+        # Toggle bidirezionale in un solo click: il valore del widget È lo stato.
+        new_val = st.toggle(
+            label, value=privacy_on(), key="_privacy_toggle_signed",
+            help="Hide/reveal all portfolio amounts and quantities.",
         )
-        if activated:
-            st.session_state.privacy_mode = True
+        if new_val != privacy_on():
+            st.session_state.privacy_mode = new_val
             st.rerun()
     else:
-        if signed_in:
-            # Utenti autenticati: disattivazione diretta, nessuna password.
-            with st.popover("🙈 Privacy on"):
-                st.caption("Portfolio values are hidden.")
-                if st.button("Reveal values", key="_privacy_reveal_btn"):
-                    st.session_state.privacy_mode = False
-                    st.rerun()
+        if not privacy_on():
+            activated = st.toggle(
+                label, value=False, key="_privacy_toggle_activate",
+                help="Hide all portfolio amounts and quantities. Sign in to "
+                     "reveal them again.",
+            )
+            if activated:
+                st.session_state.privacy_mode = True
+                st.rerun()
         else:
-            # Anonimi: devono prima autenticarsi (via il popover Sign in).
             with st.popover("🙈 Privacy on"):
                 st.caption("Portfolio values are hidden. Sign in (top-left of "
                            "this header) to reveal them.")

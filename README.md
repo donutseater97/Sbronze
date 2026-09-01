@@ -75,8 +75,10 @@ so they persist across page navigation.
 
 **Privacy mode** hides all personal euro amounts and quantities (NAVs stay
 visible — they are public prices). It is **on by default** (`main.py` sets
-`privacy_mode = True`). Anyone can enable it; only an **admin** can disable it
-via the header's `🙈 Privacy` popover. When active:
+`privacy_mode = True`). Anyone can enable it. For **signed-in** users (admin or
+viewer) the header's `🙈 Privacy` control is a single-click toggle that flips it
+on or off either way; anonymous users can only enable it and must sign in to
+reveal values again. When active:
 
 - Euro figures render as `€ ••••` and quantities as `••••`.
 - Combined-value columns (e.g. `Return [€ (%)]`) show only the `%`.
@@ -93,17 +95,18 @@ Sbronze/
 ├── main.py                       # Entry point: nav, session-state init, page wiring
 ├── config.py                     # Paths, secrets, data loaders (cached), GitHub API, roles
 ├── get_historical_data.py        # NAV updater run hourly by GitHub Actions
-├── requirements.txt              # streamlit, pandas, plotly
+├── requirements.txt              # streamlit, pandas, plotly, openpyxl
 ├── .streamlit/config.toml        # Theme + client settings
 ├── .github/workflows/
-│   └── update-historical-data.yml# Hourly NAV refresh + commit
+│   └── update-historical-data.yml# Hourly NAV refresh + analytics + commit
 ├── data/                         # All persisted data (CSV)
 │   ├── funds.csv
 │   ├── transaction_history.csv
 │   ├── historical_data.csv
 │   ├── historical_sources.csv
 │   ├── monthly_historical_data.csv
-│   └── monthly_returns.csv
+│   ├── monthly_returns.csv
+│   └── analytics/                # Pre-computed risk/correlation analytics (CSV)
 ├── pages/                        # One module per Streamlit page
 │   ├── overview_and_charts.py
 │   ├── daily_dashboard.py
@@ -111,6 +114,7 @@ Sbronze/
 │   ├── historical_prices.py
 │   ├── transaction_history.py
 │   ├── morningstar_api_data.py
+│   ├── portfolio_analysis.py     # Risk/correlation dashboard + XLSX downloads
 │   ├── active_funds.py
 │   └── add_transactions_and_funds.py
 ├── utils/
@@ -123,7 +127,8 @@ Sbronze/
 │   ├── fund_filter.py            # Fund multiselect + colour→emoji mapping
 │   └── styling.py                # hex→rgb/rgba, fund-cell styling
 └── scripts/
-    └── extract_monthly_data_for_matrix.py  # Build monthly matrices from daily data
+    ├── extract_monthly_data_for_matrix.py  # Build monthly matrices from daily data
+    └── compute_analytics.py                # Pre-compute Portfolio Analysis inputs
 ```
 
 ---
@@ -167,6 +172,17 @@ the last run, and the latest date obtained. Written by the updater.
 Month-end NAV matrix and month-over-month percentage returns, produced by
 `scripts/extract_monthly_data_for_matrix.py` from the daily data. Used for
 matrix-style views.
+
+### `data/analytics/` — pre-computed Portfolio Analysis inputs
+Produced by `scripts/compute_analytics.py` (run in the Action). All series are
+ordered ascending by date from the first common date across funds. Files:
+`nav_daily.csv`, `nav_monthly.csv`, `returns_daily.csv`, `returns_monthly.csv`
+(base series); `cov_daily.csv`, `cov_monthly.csv`, `corr_daily.csv`,
+`corr_monthly.csv` (annualized covariance / correlation matrices);
+`rolling_vol_fund.csv`, `rolling_vol_portfolio.csv`, `rolling_corr_avg.csv`,
+`rolling_corr_pairs.csv` (90-day rolling series); `metrics_summary.csv`,
+`risk_contribution.csv`, `weights_current.csv`, `analytics_meta.csv`
+(summary metrics, per-fund risk share, current weights, and freshness metadata).
 
 ---
 
@@ -214,8 +230,12 @@ background colours (green up / red down) with transaction days outlined, styled
 in a single pass and limited to a time window (default 1M) for speed.
 
 ### Transaction History (`transaction_history.py`)
-The full transaction ledger with computed columns and totals. Under privacy all
-value columns are masked except `Price` (public NAV).
+The full transaction ledger with computed columns and totals, including two
+per-row **P/L** columns: `P/L (€)` = `Quantity × (latest NAV − Price paid)` and
+`P/L (%)` = `(latest NAV / Price − 1) × 100` — the current gain/loss on each
+tranche (fees are already reflected in the purchased quantity, so they are not
+subtracted again). Under privacy all value columns are masked except `Price`
+(public NAV) and `P/L (%)`; `P/L (€)` is masked.
 
 ### Morningstar API data (`morningstar_api_data.py`)
 A reconstructed portfolio X-Ray from Morningstar's public `security_details`
@@ -228,6 +248,27 @@ completeness disclaimer.
 ### Active Funds (`active_funds.py`)
 The fund catalogue with a clickable `URL` link column to each official fund
 page.
+
+### Portfolio Analysis (`portfolio_analysis.py`)
+A risk & correlation dashboard. It performs **no heavy computation** — it only
+reads the pre-computed CSVs from `data/analytics/`, so navigation stays fast.
+Sections:
+
+1. **Key metrics** — CAGR, annualized volatility, Sharpe, Sortino, and max
+   drawdown per fund and for the portfolio. A live risk-free-rate slider
+   rescales Sharpe/Sortino on the fly (cheap, recomputed from `returns_daily`).
+2. **Rolling evolution** (90-day window) — annualized volatility per fund plus
+   the portfolio line, and average pairwise correlation with optional specific
+   pairs overlaid.
+3. **Correlation matrix** — daily or monthly heatmap over the full common
+   history.
+4. **Risk contribution** — each fund's share of total portfolio risk
+   (marginal contribution × weight; sums to 100%).
+5. **Downloads** — a multiselect of every analytics series/matrix, each
+   exported as an individual XLSX via its own download button.
+
+Everything on this page is euro-free (returns, ratios, correlations), so it is
+not affected by privacy mode.
 
 ### Add Transactions & Funds (`add_transactions_and_funds.py`)
 **Admin-only.** Forms to add transactions and funds; writes back to the CSVs
@@ -326,6 +367,36 @@ currency exposure uses net-position methodology, not hedged-position.
 
 ---
 
+## Portfolio Analysis internals
+
+`scripts/compute_analytics.py` runs in the GitHub Action **after**
+`get_historical_data.py`, so the matrices and rolling series are computed
+offline and committed to `data/analytics/`; the Streamlit page only reads them.
+This keeps navigation fast and avoids recomputing on every rerun.
+
+Method and conventions:
+- **Common window** — series start at the first date where *every* fund has a
+  NAV (e.g. 2023-01-31 for these funds), ordered ascending. Missing dates inside
+  the window are **forward-filled**.
+- **Returns** — simple percentage change (`pct_change`), daily and monthly
+  (month-end NAV).
+- **Covariance / correlation** — computed from returns; covariance is
+  **annualized** (× 252 daily, × 12 monthly); correlation is unit-free.
+- **Rolling metrics** (90-day window) — per-fund annualized volatility
+  (`std × √252`), portfolio volatility using current market-value weights, and
+  rolling correlation per pair plus the portfolio average.
+- **Summary metrics** — CAGR, annualized volatility, Sharpe
+  (`(mean − rf)/std × √252`), Sortino (downside deviation), and max drawdown,
+  per fund and for the portfolio. Risk-free defaults to 0 and can be changed in
+  the UI (Sharpe/Sortino only).
+- **Risk contribution** — `RCᵢ = wᵢ · (Σw)ᵢ / (wᵀΣw)`, summing to 100%.
+- **Weights** — default from current market value (quantity × latest NAV),
+  consistent with the Overview page. Equal-weight / invested-capital variants
+  can be added later; the current weights are saved to `weights_current.csv`.
+
+The Action commits `data/historical_data.csv`, `data/historical_sources.csv`,
+and `data/analytics/*.csv` together after each run.
+
 ## Calculated fields reference
 
 Let `Q` = summed quantity, `P` = price, `F` = fees, `NAV_t` = latest NAV.
@@ -349,6 +420,8 @@ to the nearest €10 (`round(gross/10)*10`) to match round-number bank transfers
 | YoY performance (%) | `NAV_today / NAV_(12 months ago) − 1` | |
 | Portfolio YoY | MV-weighted average of per-fund YoY | Shown in scorecards. |
 | Weight (Mkt Value) | `fund Market Value / Σ Market Value · 100` | |
+| P/L per transaction (€) | `Quantity · (latest NAV − Price paid)` | Current gain/loss on one tranche; fees already in quantity. |
+| P/L per transaction (%) | `(latest NAV / Price − 1) · 100` | |
 
 Sparklines (30-day, `SPARK_DAYS = 30`): `spark_mv` = market value series;
 `spark_return` = `MV − gross`; `spark_net_return` = `MV − net invested`;

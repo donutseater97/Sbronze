@@ -33,6 +33,7 @@ from pages.daily_dashboard import daily_dashboard
 from pages.evolution_of_portfolio import evolution_of_portfolio
 from pages.transaction_history import transaction_history
 from pages.morningstar_api_data import morningstar_api_data
+from pages.portfolio_analysis import portfolio_analysis
 from pages.active_funds import active_funds
 from pages.historical_prices import historical_prices
 from pages.add_transactions_and_funds import add_transactions_and_funds
@@ -135,6 +136,11 @@ pg = st.navigation({
             lambda: morningstar_api_data(funds, transactions, hist_data_global, last_date_str),
             title="🔎 Morningstar API data",
             url_path="morningstar",
+        ),
+        st.Page(
+            lambda: portfolio_analysis(funds, transactions, hist_data_global, last_date_str),
+            title="📊 Portfolio Analysis",
+            url_path="analysis",
         ),
         st.Page(
             lambda: active_funds(funds),

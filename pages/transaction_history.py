@@ -90,6 +90,23 @@ def transaction_history(
     trans_df["Δ Quantity"] = trans_df["Quantity"] - trans_df["Quantity (theor)"]
     trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
 
+    # ----- P/L per transazione (rispetto al NAV più recente del fondo) -----
+    # Le fee sono già scontate nella quantità acquistata, quindi il P/L confronta
+    # semplicemente il valore attuale della tranche col prezzo pagato.
+    _latest_nav = {}
+    if hist_data_global is not None and len(hist_data_global) > 0 and "date" in hist_data_global.columns:
+        _hd = hist_data_global.sort_values("date")
+        _last = _hd.iloc[-1]
+        for _f in transactions["Fund"].unique():
+            if _f in _hd.columns and pd.notna(_last.get(_f)):
+                _latest_nav[_f] = float(_last[_f])
+    trans_df["_pl_eur"] = trans_df.apply(
+        lambda r: r["Quantity"] * (_latest_nav[r["Fund"]] - r["Price (€)"])
+        if r["Fund"] in _latest_nav else float("nan"), axis=1)
+    trans_df["_pl_pct"] = trans_df.apply(
+        lambda r: (_latest_nav[r["Fund"]] / r["Price (€)"] - 1.0) * 100.0
+        if r["Fund"] in _latest_nav and r["Price (€)"] else float("nan"), axis=1)
+
     # Precisione decimale per fondo
     fund_qty_decimals = get_fund_qty_decimals(transactions)
 
@@ -98,11 +115,13 @@ def transaction_history(
         "Reference Period", "Date_str", "Fund", "Price (€)", "Quantity",
         "Fees (€)", "Gross Contribution (theor)", "Net Invested",
         "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity",
+        "_pl_eur", "_pl_pct",
     ]].copy()
     display_df.columns = [
         "Reference Period", "Date", "Fund", "Price (€)", "Quantity",
         "Fees (€)", "Gross Contribution", "Net Invested",
         "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity",
+        "P/L (€)", "P/L (%)",
     ]
 
     # Colonne helper per styling (raw values)
@@ -140,6 +159,14 @@ def transaction_history(
 
     display_df["Quantity (theor) (Δ vs Q real)"] = display_df.apply(_format_qty_calc, axis=1)
 
+    # Formatta P/L: valore € (mascherato in privacy) e percentuale (sempre visibile).
+    display_df["_pl_eur_raw"] = display_df["P/L (€)"].values
+    display_df["_pl_pct_raw"] = display_df["P/L (%)"].values
+    display_df["P/L (€)"] = display_df["P/L (€)"].apply(
+        lambda v: (MASK if privacy_on() else (f"€{v:+,.2f}" if pd.notna(v) else "—")))
+    display_df["P/L (%)"] = display_df["P/L (%)"].apply(
+        lambda v: f"{v:+.2f}%" if pd.notna(v) else "—")
+
     # Rimuovi colonne intermedie
     display_df = display_df.drop(columns=["Net Invested", "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity"])
     display_df["_fund_type"] = trans_df["Fund"].values
@@ -172,6 +199,14 @@ def transaction_history(
                     styles.append(f"background-color: {green}")
                 else:
                     styles.append(f"background-color: {red}")
+            elif col in ("P/L (€)", "P/L (%)"):
+                pv = row.get("_pl_pct_raw", None)
+                if pv is None or pd.isna(pv):
+                    styles.append("")
+                elif pv >= 0:
+                    styles.append(f"background-color: {green}")
+                else:
+                    styles.append(f"background-color: {red}")
             else:
                 styles.append("")
         return styles
@@ -190,6 +225,7 @@ def transaction_history(
     _col_config = {
         "Price (€)": st.column_config.NumberColumn(format="€%.2f"),
         "_delta_net_inv_raw": None, "_delta_qty_raw": None,
+        "_pl_eur_raw": None, "_pl_pct_raw": None,
         "_delta_net_inv_disp": None, "_delta_qty_disp": None, "_fund_type": None,
     }
     if not privacy_on():
