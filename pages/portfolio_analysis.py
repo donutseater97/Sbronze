@@ -68,6 +68,7 @@ _DOWNLOADS = {
     "Covariance — monthly (annualized)": ("cov_monthly.csv", False),
     "Correlation — daily": ("corr_daily.csv", False),
     "Correlation — monthly": ("corr_monthly.csv", False),
+    "Weights": ("weights.csv", False)
 }
 
 
