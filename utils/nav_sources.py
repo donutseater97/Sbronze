@@ -7,9 +7,9 @@ Morningstar API data. Ogni funzione è indipendente e solleva eccezione
 in caso di errore, così il chiamante può gestire la cascata di fallback.
 
 Sorgenti, in ordine di preferenza per i NAV:
-  1. investgo          (scraping investing.com — spesso bloccato da IP datacenter)
-  2. Morningstar       (endpoint pubblico lt.morningstar.com, multi-token)
-  3. API ufficiali     (JPMorgan / Fidelity / BlackRock / UBS a seconda del fondo)
+    1. API ufficiali     (JPMorgan / Fidelity / BlackRock / UBS a seconda del fondo)
+    2. Morningstar       (endpoint pubblico lt.morningstar.com, multi-token)
+    3. investgo          (scraping investing.com — spesso bloccato da IP datacenter)
 
 NOTA STORICA sull'host Morningstar: fino a metà 2026 l'host regionale
 tools.morningstar.<paese> serviva l'API REST. Ora quegli host fanno
@@ -248,7 +248,8 @@ def fetch_ubs_nav(isin: str, fund_name: str) -> pd.DataFrame:
 
 
 # Mappa ISIN -> funzione ufficiale + URL/parametro specifico del fondo.
-# Usata come ultima risorsa quando investgo e Morningstar falliscono entrambi.
+# Per i fondi non-JPM è la prima scelta; per i JPMorgan viene lasciata fuori
+# dal primo tentativo perché l'handler JPMorgan è più affidabile del resto.
 OFFICIAL_FUND_SOURCES = {
     # JPMorgan (già primario per questi due, ma elencato per completezza)
     "LU0281484963": ("JPMorgan AM", lambda name: fetch_jpmorgan_nav("LU0281484963", name)),

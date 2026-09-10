@@ -2,9 +2,9 @@
 get_historical_data.py — Aggiorna data/historical_data.csv con i NAV di tutti i fondi.
 
 Per OGNI fondo prova le sorgenti in cascata, fermandosi alla prima che riesce:
-    1. investgo    (investing.com; spesso bloccato dagli IP GitHub Actions)
+    1. API ufficiale del fondo (JPMorgan / Fidelity / BlackRock / UBS)
     2. Morningstar (lt.morningstar.com, endpoint pubblico multi-token)
-    3. API ufficiale del fondo (JPMorgan / Fidelity / BlackRock / UBS)
+    3. investgo    (investing.com; spesso bloccato dagli IP GitHub Actions)
 
 Le sorgenti sono definite in utils/nav_sources.py e condivise con la pagina
 Streamlit "Morningstar API data".
@@ -48,21 +48,22 @@ def fetch_fund(fund_name, ticker, isin, is_jpm):
     """Prova le sorgenti in cascata per un singolo fondo.
 
     Per i fondi JPMorgan l'API ufficiale è la più affidabile e viene provata per
-    prima; per gli altri si prova investgo, poi Morningstar, poi l'eventuale API
-    ufficiale del fondo. Ritorna (DataFrame, source_label) o solleva eccezione.
+    prima; per gli altri si prova prima l'eventuale API ufficiale del fondo,
+    poi Morningstar, poi investgo. Ritorna (DataFrame, source_label) o solleva
+    eccezione.
     """
     attempts = []
     if is_jpm:
         attempts.append(("JPMorgan AM", lambda: fetch_jpmorgan_nav(isin, fund_name)))
         attempts.append(("Morningstar", lambda: fetch_morningstar_nav(ticker, fund_name)))
     else:
-        attempts.append(("InvestGo", lambda: fetch_investgo_nav(
-            ticker, fund_name, start_ddmmyyyy, end_ddmmyyyy)))
-        attempts.append(("Morningstar", lambda: fetch_morningstar_nav(ticker, fund_name)))
         official = OFFICIAL_FUND_SOURCES.get(isin)
         if official:
             src_label, fn = official
             attempts.append((src_label, lambda: fn(fund_name)))
+        attempts.append(("Morningstar", lambda: fetch_morningstar_nav(ticker, fund_name)))
+        attempts.append(("InvestGo", lambda: fetch_investgo_nav(
+            ticker, fund_name, start_ddmmyyyy, end_ddmmyyyy)))
 
     last_err = None
     for label, fn in attempts:

@@ -118,7 +118,7 @@ Sbronze/
 │   ├── active_funds.py
 │   └── add_transactions_and_funds.py
 ├── utils/
-│   ├── nav_sources.py            # NAV/analytics fetchers (investgo, Morningstar, official)
+│   ├── nav_sources.py            # NAV/analytics fetchers (official, Morningstar, investgo)
 │   ├── morningstar_api.py        # Parse security_details XML → analytics + aggregation
 │   ├── privacy.py                # Roles, privacy mode, page header, spark masking
 │   └── formatting.py             # Decimal precision & quantity formatting
@@ -142,7 +142,7 @@ updater merges new rows over existing ones.
 | Column | Meaning |
 |---|---|
 | `Fund` | Short label / key used everywhere (e.g. `US`, `EU HY`). |
-| `Ticker` | Morningstar ID (e.g. `0P0001CRXW`); used for investgo and Morningstar. |
+| `Ticker` | Morningstar ID (e.g. `0P0001CRXW`); used for Morningstar and InvestGo. |
 | `ISIN` | Fund ISIN; used for JPMorgan/Fidelity/BlackRock/UBS official sources. |
 | `Fund Name` | Full legal name. Detection of `"JPMorgan"` here routes the NAV source. |
 | `Type` | `Equity` or `Bond`. |
@@ -164,8 +164,8 @@ updater merges new rows over existing ones.
 fund's first valid value; dates before a fund existed are blank.
 
 ### `historical_sources.csv` — provenance metadata
-`Fund, Source, LastDate` — which source (`InvestGo`, `Morningstar`,
-`JPMorgan AM`, `Fidelity`, `BlackRock`, `UBS`) actually supplied each fund on
+`Fund, Source, LastDate` — which source (`JPMorgan AM`, `Fidelity`, `BlackRock`,
+`UBS`, `Morningstar`, `InvestGo`) actually supplied each fund on
 the last run, and the latest date obtained. Written by the updater.
 
 ### `monthly_historical_data.csv` / `monthly_returns.csv`
@@ -285,15 +285,14 @@ admin-password prompt.
 ## Utilities & components
 
 ### `utils/nav_sources.py`
-All NAV/analytics fetchers, shared by the updater and the Morningstar page.
+- `fetch_jpmorgan_nav`, `fetch_fidelity_nav`, `fetch_blackrock_nav`,
+  `fetch_ubs_nav` — official fund sources; `OFFICIAL_FUND_SOURCES` maps ISIN →
+  fetcher.
 - `fetch_investgo_nav` — investing.com via the `investgo` library.
 - `fetch_morningstar_nav` / `fetch_morningstar_details_xml` — Morningstar public
   REST API with **host + token rotation** (`MORNINGSTAR_HOSTS`,
   `MORNINGSTAR_TOKENS`). The live host is `lt.morningstar.com`; the historic
   `tools.morningstar.<cc>` hosts are kept as fallbacks.
-- `fetch_jpmorgan_nav`, `fetch_fidelity_nav`, `fetch_blackrock_nav`,
-  `fetch_ubs_nav` — official fund sources; `OFFICIAL_FUND_SOURCES` maps ISIN →
-  fetcher.
 
 ### `utils/morningstar_api.py`
 - `parse_fund_analytics(xml)` — parses the ~2 MB XML into asset allocation,
