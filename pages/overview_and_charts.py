@@ -21,7 +21,7 @@ from components.chart_helpers import (
     get_plotly_config,
     RANGE_SELECTOR_BUTTONS_SHORT,
 )
-from utils.formatting import count_decimals, format_qty
+from utils.formatting import count_decimals, format_qty, f_eur, f_pct, f_num, f_qty, sign_bg, style_cols
 from utils.privacy import privacy_on, fmt_eur, mask_text, render_page_header, MASK, MASK_PLAIN, normalize_spark
 
 
@@ -101,6 +101,7 @@ def overview_and_charts(
 
     # Salva quantità numerica prima di formattare
     qty_numeric = summary["Quantity"].astype(float).copy()
+    summary["_qty_num"] = qty_numeric   # viaggia con la riga anche dopo il riordino
 
     # ----- Prezzi più recenti e Market Value -----
     hist_data = hist_data_global
@@ -212,115 +213,83 @@ def overview_and_charts(
     summary = summary.sort_values("fund_order").reset_index(drop=True)
 
     # ===== TABELLA SUMMARY =====
+    # Valori NUMERICI + testo da Styler.format: l'ordinamento per colonna usa
+    # il valore reale. Le colonne combinate "€ (%)" e "prezzo (Δ%)" sono state
+    # separate in due colonne ordinabili.
     # Ordine colonne richiesto: gross contr, net invested, market value, latest
     # price, average nav, quantity, fees, return, net return, mom, ytd, yoy, weight.
-    display_summary = summary[[
-        "Fund", "Gross Contributions (€)", "Net Invested (€)", "Market Value (€)",
-        "Latest Price (€)", "Average NAV (€)", "Quantity", "Fees (€)",
-        "Total Return [€ (%)]", "Net Return [€ (%)]",
-        "MoM performance (%)", "YTD performance (%)", "YoY performance (%)",
-        "Weight (Mkt Value)",
-    ]].copy()
+    pv = privacy_on()
+    display_summary = pd.DataFrame({
+        "Fund": summary["Fund"],
+        "Gross Contributions (€)": summary["Gross Contributions (€)"],
+        "Net Invested (€)": summary["Net Invested (€)"],
+        "Market Value (€)": summary["Market Value (€)"],
+        "Latest Price (€)": summary["Latest Price (€)"],
+        "Daily Δ (%)": summary["Fund"].map(latest_pct_map),
+        "Average NAV (€)": summary["Average NAV (€)"],
+        "Quantity": summary["_qty_num"],
+        "Fees (€)": summary["Fees (€)"],
+        "Return (€)": summary["Total Return (€)"],
+        "Return (%)": summary["Total Return (%)"],
+        "Net Return (€)": summary["Net Return (€)"],
+        "Net Return (%)": summary["Net Return (%)"],
+        "MoM performance (%)": summary["MoM performance (%)"],
+        "YTD performance (%)": summary["YTD performance (%)"],
+        "YoY performance (%)": summary["YoY performance (%)"],
+        "Weight (Mkt Value)": summary["Weight (Mkt Value)"],
+    })
 
-    display_summary = display_summary.rename(
-        columns={"Total Return [€ (%)]": "Return [€ (%)]"}
-    )
+    # Colori calcolati dai valori reali (prima di un eventuale mascheramento)
+    _sign_src = {
+        "Return (€)": summary["Total Return (€)"], "Return (%)": summary["Total Return (€)"],
+        "Net Return (€)": summary["Net Return (€)"], "Net Return (%)": summary["Net Return (€)"],
+        "MoM performance (%)": summary["MoM performance (%)"],
+        "YTD performance (%)": summary["YTD performance (%)"],
+        "YoY performance (%)": summary["YoY performance (%)"],
+    }
 
-    # Privacy: nelle colonne combinate € (%) mostra solo la percentuale
-    if privacy_on():
-        display_summary["Quantity"] = MASK_PLAIN
-        display_summary["Return [€ (%)]"] = summary["Total Return (%)"].map(
-            lambda p: f"{MASK} ({p:+.2f}%)"
-        )
-        display_summary["Net Return [€ (%)]"] = summary["Net Return (%)"].map(
-            lambda p: f"{MASK} ({p:+.2f}%)"
-        )
+    # Privacy: importi € e quantità nascosti; l'ordinamento su colonna costante
+    # non rivela i valori. Le percentuali restano visibili, come prima.
+    eur_masked = ["Gross Contributions (€)", "Net Invested (€)", "Market Value (€)",
+                  "Average NAV (€)", "Fees (€)", "Return (€)", "Net Return (€)"]
+    if pv:
+        # Costante (non NaN, che st.dataframe mostrerebbe come "None")
+        display_summary[eur_masked + ["Quantity"]] = 0.0
 
-    # Valori grezzi per colorazione condizionale
-    display_summary["_Total_Return_raw"] = summary["Total Return (€)"]
-    display_summary["_Net_Return_raw"] = summary["Net Return (€)"]
-    display_summary["_MoM_raw"] = summary["MoM performance (%)"]
-    display_summary["_YTD_raw"] = summary["YTD performance (%)"]
-    display_summary["_YoY_raw"] = summary["YoY performance (%)"]
-
-    # Formattazione colonne €
-    for col in ["Gross Contributions (€)", "Net Invested (€)", "Fees (€)", "Average NAV (€)"]:
-        display_summary[col] = display_summary[col].apply(lambda x: fmt_eur(x))
-
-    # Latest Price con % variazione giornaliera
-    def _fmt_latest_price_row(row):
-        fund = row["Fund"]
-        price = summary.loc[summary["Fund"] == fund, "Latest Price (€)"].values[0]
-        base = f"€ {float(price):,.2f}" if pd.notna(price) else "€ 0.00"
-        pct = latest_pct_map.get(fund)
-        if pct is None:
-            return base
-        if pct == 0:
-            return f"{base} (0.00%)"
-        sign = "+" if pct > 0 else ""
-        return f"{base} ({sign}{pct:.2f}%)"
-
-    display_summary["Latest Price (€)"] = display_summary.apply(_fmt_latest_price_row, axis=1)
-
-    # Market Value formattato
-    def _fmt_mv_row(row):
-        fund = row["Fund"]
-        mv = summary.loc[summary["Fund"] == fund, "Market Value (€)"].values[0]
-        return fmt_eur(float(mv)) if pd.notna(mv) else fmt_eur(0.0)
-
-    display_summary["Market Value (€)"] = display_summary.apply(_fmt_mv_row, axis=1)
-    for _perf_col in ["MoM performance (%)", "YTD performance (%)", "YoY performance (%)"]:
-        display_summary[_perf_col] = display_summary[_perf_col].apply(lambda x: f"{x:.2f}%")
-    display_summary["Weight (Mkt Value)"] = display_summary["Weight (Mkt Value)"].apply(
-        lambda x: f"{x:.2f}%"
-    )
-
-    # Lookup per colorazione
-    raw_values = (
-        display_summary[["Fund", "_Total_Return_raw", "_Net_Return_raw",
-                         "_MoM_raw", "_YTD_raw", "_YoY_raw"]]
-        .set_index("Fund")
-    )
-
-    # Rimuovi colonne helper
-    display_summary = display_summary.drop(
-        columns=["_Total_Return_raw", "_Net_Return_raw", "_MoM_raw", "_YTD_raw", "_YoY_raw"]
-    )
-
-    # ----- Stile tabella -----
     def style_fund_rows(row):
-        """Colora: Fund col → colore fondo, Return/MoM → verde/rosso."""
-        fund_name = row["Fund"]
-        tr_raw = raw_values.loc[fund_name, "_Total_Return_raw"]
-        nr_raw = raw_values.loc[fund_name, "_Net_Return_raw"]
-        mom_raw = raw_values.loc[fund_name, "_MoM_raw"]
-        ytd_raw = raw_values.loc[fund_name, "_YTD_raw"]
-        yoy_raw = raw_values.loc[fund_name, "_YoY_raw"]
-
+        """Colora: Fund col → colore fondo, Return/MoM/YTD/YoY → verde/rosso."""
+        i = row.name
         styles = []
         for col in row.index:
             if col == "Fund":
-                styles.append(style_fund_cell(fund_name, FUND_COLORS))
-            elif col == "Return [€ (%)]":
-                bg = "background-color: rgba(46,160,67,0.15);" if tr_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
-                styles.append(bg)
-            elif col == "Net Return [€ (%)]":
-                bg = "background-color: rgba(46,160,67,0.15);" if nr_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
-                styles.append(bg)
-            elif col == "MoM performance (%)":
-                bg = "background-color: rgba(46,160,67,0.15);" if mom_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
-                styles.append(bg)
-            elif col == "YTD performance (%)":
-                bg = "background-color: rgba(46,160,67,0.15);" if ytd_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
-                styles.append(bg)
-            elif col == "YoY performance (%)":
-                bg = "background-color: rgba(46,160,67,0.15);" if yoy_raw >= 0 else "background-color: rgba(248,81,73,0.15);"
-                styles.append(bg)
+                styles.append(style_fund_cell(row["Fund"], FUND_COLORS))
+            elif col in _sign_src:
+                styles.append(sign_bg(_sign_src[col].at[i], alpha=0.15, zero_neutral=False))
             else:
                 styles.append("")
         return styles
 
     styled_summary = display_summary.style.apply(style_fund_rows, axis=1)
+    styled_summary = style_cols(styled_summary, {
+        "Latest Price (€)": f_eur(space=True),
+        "Daily Δ (%)": f_pct(signed=True),
+        "Return (%)": f_pct(), "Net Return (%)": f_pct(),
+        "MoM performance (%)": f_pct(), "YTD performance (%)": f_pct(),
+        "YoY performance (%)": f_pct(), "Weight (Mkt Value)": f_pct(),
+    }, na_rep="")
+    if pv:
+        styled_summary = styled_summary.format(lambda v: MASK, subset=eur_masked, na_rep=MASK)
+        styled_summary = styled_summary.format(lambda v: MASK_PLAIN, subset=["Quantity"], na_rep=MASK_PLAIN)
+    else:
+        styled_summary = style_cols(styled_summary,
+            {c: f_eur(space=True) for c in eur_masked if c not in ("Return (€)", "Net Return (€)")},
+            na_rep="")
+        styled_summary = style_cols(styled_summary,
+            {"Return (€)": f_num(2), "Net Return (€)": f_num(2)}, na_rep="")
+        for fund, dp in fund_qty_dec.items():
+            rows = display_summary.index[display_summary["Fund"] == fund]
+            if len(rows):
+                styled_summary = styled_summary.format(f_qty(dp), subset=pd.IndexSlice[rows, ["Quantity"]])
     st.dataframe(styled_summary, width="stretch", hide_index=False)
 
     # ===== TOTALS ROW =====

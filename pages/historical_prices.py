@@ -19,6 +19,7 @@ from datetime import date, datetime
 
 from config import FUND_COLORS, FUNDS_FILE, HISTORICAL_FILE, load_historical_prices
 from components.fund_filter import render_fund_filter
+from utils.formatting import f_eur
 from components.styling import (
     daily_change_style,
     fund_header_css,
@@ -916,9 +917,8 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
         for f in selected_funds:
             tx_dates_by_fund[f] = set(tx_tmp[tx_tmp["Fund"] == f]["Date"].dt.strftime("%Y-%m-%d").tolist())
 
-    # Formatta prezzi
-    for col in selected_funds:
-        display_df[col] = display_df[col].apply(lambda x: f"€{x:.2f}" if pd.notna(x) else "")
+    # Prezzi restano numerici: il testo "€x.xx" arriva da Styler.format sotto,
+    # così l'ordinamento per colonna è per valore (non alfabetico).
 
     # Colore SFONDO cella (verde salita, rosso discesa) + evidenzia transazioni,
     # in UNA sola passata per colonna (più veloce di due .apply separati).
@@ -945,6 +945,7 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
         return out
 
     styler = display_df.style.apply(_style_col, subset=selected_funds, axis=0)
+    styler = styler.format(f_eur(thousands=False), subset=selected_funds, na_rep="")
 
     display_df = display_df[["date"] + selected_funds]
     st.dataframe(styler, use_container_width=True)

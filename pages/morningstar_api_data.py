@@ -19,6 +19,7 @@ from components.chart_helpers import get_plotly_config
 from config import FUND_COLORS
 from utils.official_data import fetch_official_portfolio, OfficialUnavailable, provider_for
 from utils.privacy import fmt_eur, render_page_header, privacy_on, MASK
+from utils.formatting import f_pct, style_cols
 from utils.morningstar_api import (
     fetch_security_details_xml,
     parse_fund_analytics,
@@ -672,11 +673,13 @@ def morningstar_api_data(funds: pd.DataFrame, transactions: pd.DataFrame,
                     detail = pd.DataFrame([
                         {
                             "Fund": b["fund"],
-                            "Weight in fund": f"{b['fund_weight']:.2f}%",
-                            "Weight in portfolio": f"{b['portfolio_weight']:.2f}%",
+                            "Weight in fund": b["fund_weight"],
+                            "Weight in portfolio": b["portfolio_weight"],
                         }
                         for b in bd
                     ])
+                    detail = style_cols(detail.style, {"Weight in fund": f_pct(),
+                                                       "Weight in portfolio": f_pct()})
                     try:
                         st.dataframe(detail, width="stretch", hide_index=True,
                                      row_height=28)

@@ -15,10 +15,8 @@ from config import FUND_COLORS
 from components.fund_filter import render_fund_filter
 from components.styling import style_fund_cell
 from utils.formatting import (
-    count_decimals,
     get_fund_qty_decimals,
-    format_qty,
-    format_delta_net_inv,
+    f_eur, f_pct, f_num, f_qty, f_date, sign_bg, style_cols,
 )
 
 
@@ -110,137 +108,95 @@ def transaction_history(
     # Precisione decimale per fondo
     fund_qty_decimals = get_fund_qty_decimals(transactions)
 
-    # ----- Prepara DataFrame di display -----
-    display_df = trans_df[[
-        "Reference Period", "Date_str", "Fund", "Price (€)", "Quantity",
-        "Fees (€)", "Gross Contribution (theor)", "Net Invested",
-        "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity",
-        "_pl_eur", "_pl_pct",
-    ]].copy()
-    display_df.columns = [
-        "Reference Period", "Date", "Fund", "Price (€)", "Quantity",
-        "Fees (€)", "Gross Contribution", "Net Invested",
-        "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity",
-        "P/L (€)", "P/L (%)",
-    ]
+    # ----- DataFrame di display: SOLO valori numerici / date -----
+    # Il testo mostrato viene da Styler.format, così l'ordinamento per colonna
+    # di st.dataframe usa il valore reale (prima le colonne erano stringhe e si
+    # ordinavano alfabeticamente). Le colonne combinate "valore (Δ)" sono state
+    # separate in due colonne, entrambe ordinabili.
+    pv = privacy_on()
+    display_df = pd.DataFrame({
+        "Reference Period": trans_df["Date"].dt.to_period("M").dt.to_timestamp(),
+        "Date": trans_df["Date"].dt.normalize(),
+        "Fund": trans_df["Fund"],
+        "Price (€)": trans_df["Price (€)"],
+        "Quantity": trans_df["Quantity"],
+        "Fees (€)": trans_df["Fees (€)"],
+        "Gross Contribution": trans_df["Gross Contribution (theor)"],
+        "Net Invested": trans_df["Net Invested"],
+        "Δ vs Exp": trans_df["Δ Net Inv vs Exp"],
+        "Quantity (theor)": trans_df["Quantity (theor)"],
+        "Δ vs Q real": trans_df["Δ Quantity"],
+        "P/L (€)": trans_df["_pl_eur"],
+        "P/L (%)": trans_df["_pl_pct"],
+    }).reset_index(drop=True)
 
-    # Colonne helper per styling (raw values)
-    display_df["_delta_net_inv_raw"] = trans_df["Δ Net Inv vs Exp"].values
-    display_df["_delta_qty_raw"] = trans_df["Δ Quantity"].values
-    display_df["_delta_net_inv_disp"] = display_df["_delta_net_inv_raw"].apply(format_delta_net_inv)
+    # Privacy: oscura tutte le colonne valore tranne Price (NAV pubblico) e P/L %.
+    eur_masked = ["Fees (€)", "Gross Contribution", "Net Invested", "Δ vs Exp", "P/L (€)"]
+    qty_masked = ["Quantity", "Quantity (theor)", "Δ vs Q real"]
+    # Colori dei Δ calcolati prima di mascherare (il segno resta visibile,
+    # come prima: in privacy mode è nascosto solo l'importo)
+    _dni_sign = display_df["Δ vs Exp"].round(2)
+    if pv:
+        # Valore costante (non NaN: st.dataframe mostra "None" per le celle vuote,
+        # ignorando il formatter). Colonna costante => l'ordinamento non rivela nulla.
+        display_df[eur_masked + qty_masked] = 0.0
 
-    def _format_delta_qty_row(row):
-        dq = row["_delta_qty_raw"]
+    # Δ quantità arrotondato ai decimali del fondo (per il colore)
+    def _dq_rounded(i):
+        dq = trans_df["Δ Quantity"].iloc[i]
         if pd.isna(dq):
-            return None
-        dp = fund_qty_decimals.get(row["Fund"], 3)
-        rounded = round(dq, dp)
-        return 0.0 if abs(rounded) < 10 ** (-dp) else rounded
-
-    display_df["_delta_qty_disp"] = display_df.apply(_format_delta_qty_row, axis=1)
-
-    # Formatta Quantity
-    display_df["Quantity"] = display_df["Quantity"].apply(format_qty)
-
-    # Combina Net Invested con delta
-    display_df["Net Invested (Δ vs Exp)"] = display_df.apply(
-        lambda r: f"{r['Net Invested']:.2f} ({r['_delta_net_inv_raw']:+.2f})" if pd.notna(r["_delta_net_inv_raw"]) else f"{r['Net Invested']:.2f}",
-        axis=1,
-    )
-
-    # Combina Quantity (theor) con delta
-    def _format_qty_calc(row):
-        dp = fund_qty_decimals.get(row["Fund"], 3)
-        q = row["Quantity (theor)"]
-        dq = row["_delta_qty_raw"]
-        q_str = "" if pd.isna(q) else f"{round(q, dp):.{dp}f}"
-        dq_str = f" ({round(dq, dp):+.{dp}f})" if pd.notna(dq) else ""
-        return q_str + dq_str
-
-    display_df["Quantity (theor) (Δ vs Q real)"] = display_df.apply(_format_qty_calc, axis=1)
-
-    # Formatta P/L: valore € (mascherato in privacy) e percentuale (sempre visibile).
-    display_df["_pl_eur_raw"] = display_df["P/L (€)"].values
-    display_df["_pl_pct_raw"] = display_df["P/L (%)"].values
-    display_df["P/L (€)"] = display_df["P/L (€)"].apply(
-        lambda v: (MASK if privacy_on() else (f"€{v:+,.2f}" if pd.notna(v) else "—")))
-    display_df["P/L (%)"] = display_df["P/L (%)"].apply(
-        lambda v: f"{v:+.2f}%" if pd.notna(v) else "—")
-
-    # Rimuovi colonne intermedie
-    display_df = display_df.drop(columns=["Net Invested", "Δ Net Inv vs Exp", "Quantity (theor)", "Δ Quantity"])
-    display_df["_fund_type"] = trans_df["Fund"].values
+            return float("nan")
+        dp = fund_qty_decimals.get(display_df.at[i, "Fund"], 3)
+        r = round(dq, dp)
+        return 0.0 if abs(r) < 10 ** (-dp) else r
+    _dq_col = pd.Series([_dq_rounded(i) for i in range(len(display_df))], index=display_df.index)
+    _pl_pct = display_df["P/L (%)"]
 
     # ----- Stile tabella -----
-    def style_fund_rows(row):
-        """Colora Fund col, Net Invested delta e Quantity delta."""
-        fund = row["_fund_type"]
-        green = "rgba(46, 160, 67, 0.12)"
-        red = "rgba(248, 81, 73, 0.12)"
+    def style_rows(row):
+        i = row.name
         styles = []
         for col in row.index:
-            if col.startswith("_"):
-                styles.append("display: none;")
-            elif col == "Fund":
-                styles.append(style_fund_cell(fund, FUND_COLORS))
-            elif col == "Net Invested (Δ vs Exp)":
-                dv = row.get("_delta_net_inv_disp", None)
-                if dv is None or dv == 0:
-                    styles.append("")
-                elif dv > 0:
-                    styles.append(f"background-color: {green}")
-                else:
-                    styles.append(f"background-color: {red}")
-            elif col == "Quantity (theor) (Δ vs Q real)":
-                dv = row.get("_delta_qty_disp", None)
-                if dv is None or dv == 0:
-                    styles.append("")
-                elif dv > 0:
-                    styles.append(f"background-color: {green}")
-                else:
-                    styles.append(f"background-color: {red}")
+            if col == "Fund":
+                styles.append(style_fund_cell(row["Fund"], FUND_COLORS))
+            elif col == "Δ vs Exp":
+                styles.append(sign_bg(_dni_sign.at[i]))
+            elif col == "Δ vs Q real":
+                styles.append(sign_bg(_dq_col.at[i]))
             elif col in ("P/L (€)", "P/L (%)"):
-                pv = row.get("_pl_pct_raw", None)
-                if pv is None or pd.isna(pv):
-                    styles.append("")
-                elif pv >= 0:
-                    styles.append(f"background-color: {green}")
-                else:
-                    styles.append(f"background-color: {red}")
+                v = _pl_pct.at[i]
+                styles.append("" if pd.isna(v) else sign_bg(v, zero_neutral=False))
             else:
                 styles.append("")
         return styles
 
-    # Privacy: oscura tutte le colonne valore tranne il Price (NAV pubblico)
-    if privacy_on():
-        for _col in ["Fees (€)", "Gross Contribution", "Net Invested (Δ vs Exp)"]:
-            if _col in display_df.columns:
-                display_df[_col] = MASK
-        for _col in ["Quantity", "Quantity (theor) (Δ vs Q real)"]:
-            if _col in display_df.columns:
-                display_df[_col] = MASK_PLAIN
+    styled_df = display_df.style.apply(style_rows, axis=1)
+    styled_df = style_cols(styled_df, {
+        "Reference Period": f_date("%Y %b"),
+        "Date": f_date("%Y-%m-%d"),
+        "Price (€)": f_eur(thousands=False),
+    })
+    if pv:
+        styled_df = styled_df.format(lambda v: MASK, subset=eur_masked, na_rep=MASK)
+        styled_df = styled_df.format(lambda v: MASK_PLAIN, subset=qty_masked, na_rep=MASK_PLAIN)
+    else:
+        styled_df = style_cols(styled_df, {
+            "Quantity": f_qty(),
+            "Fees (€)": f_eur(thousands=False),
+            "Gross Contribution": f_eur(thousands=False),
+            "Net Invested": f_num(2),
+            "Δ vs Exp": f_num(2, signed=True),
+            "P/L (€)": f_eur(signed=True, sign_after_symbol=True),
+        }, na_rep="—")
+        # Quantità teorica e Δ: decimali del singolo fondo (un blocco per fondo)
+        for fund, dp in fund_qty_decimals.items():
+            rows = display_df.index[display_df["Fund"] == fund]
+            if len(rows):
+                styled_df = styled_df.format(f_num(dp), subset=pd.IndexSlice[rows, ["Quantity (theor)"]])
+                styled_df = styled_df.format(f_num(dp, signed=True), subset=pd.IndexSlice[rows, ["Δ vs Q real"]])
+    styled_df = style_cols(styled_df, {"P/L (%)": f_pct(signed=True)}, na_rep="—")
 
-    # Sposta le colonne P/L in fondo alla tabella (le helper "_..." restano dopo,
-    # ma sono nascoste dal column_config).
-    _visible = [c for c in display_df.columns if not c.startswith("_")]
-    _hidden = [c for c in display_df.columns if c.startswith("_")]
-    _pl = [c for c in ["P/L (€)", "P/L (%)"] if c in _visible]
-    _rest = [c for c in _visible if c not in _pl]
-    display_df = display_df[_rest + _pl + _hidden]
-
-    styled_df = display_df.style.apply(style_fund_rows, axis=1)
-
-    _col_config = {
-        "Price (€)": st.column_config.NumberColumn(format="€%.2f"),
-        "_delta_net_inv_raw": None, "_delta_qty_raw": None,
-        "_pl_eur_raw": None, "_pl_pct_raw": None,
-        "_delta_net_inv_disp": None, "_delta_qty_disp": None, "_fund_type": None,
-    }
-    if not privacy_on():
-        _col_config["Fees (€)"] = st.column_config.NumberColumn(format="€%.2f")
-        _col_config["Gross Contribution"] = st.column_config.NumberColumn(format="€%.2f")
-
-    st.dataframe(styled_df, width="stretch", hide_index=True, column_config=_col_config)
+    st.dataframe(styled_df, width="stretch", hide_index=True)
 
     # CSS per testo piccolo nelle metriche
     st.markdown("""

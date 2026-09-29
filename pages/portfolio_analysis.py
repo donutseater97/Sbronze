@@ -31,6 +31,7 @@ import plotly.graph_objects as go
 from config import FUND_COLORS
 from components.chart_helpers import get_plotly_config
 from components.styling import hex_to_rgb
+from utils.formatting import f_pct, f_num, style_cols
 from utils.privacy import render_page_header
 
 _ANALYTICS_DIR = os.path.join(
@@ -273,13 +274,12 @@ def _render_metrics_scorecards(metrics):
 
 
 def _render_metrics_table(metrics):
-    show = metrics.copy()
-    for col in ["CAGR", "AnnVol", "MaxDD"]:
-        show[col] = show[col].apply(_pct)
-    for col in ["Sharpe", "Sortino"]:
-        show[col] = show[col].apply(_num)
-    show = show.rename(columns={"AnnVol": "Ann. Vol", "MaxDD": "Max DD"})
-    st.dataframe(show, width="stretch", hide_index=True)
+    # Valori numerici + testo da Styler.format => ordinamento per valore reale
+    show = metrics.rename(columns={"AnnVol": "Ann. Vol", "MaxDD": "Max DD"})
+    styler = style_cols(show.style, {"CAGR": f_pct(scale=100), "Ann. Vol": f_pct(scale=100),
+                                     "Max DD": f_pct(scale=100),
+                                     "Sharpe": f_num(2), "Sortino": f_num(2)}, na_rep="—")
+    st.dataframe(styler, width="stretch", hide_index=True)
 
 
 def _render_composition(returns_daily, funds, weights):
@@ -415,10 +415,12 @@ def _render_risk_contribution(cov_d, funds, weights):
         st.plotly_chart(fig, width="stretch", config=get_plotly_config("risk_contrib"))
     with col_tbl:
         disp = pd.DataFrame({
-            "Fund": funds,
-            "Weight": [f"{weights.get(f,0)*100:.1f}%" for f in funds],
-            "Risk %": [f"{v*100:.1f}%" for v in rc_pct]})
-        st.dataframe(disp, width="stretch", hide_index=True)
+            "Fund": list(funds),
+            "Weight": [weights.get(f, 0) for f in funds],
+            "Risk %": list(rc_pct)})
+        st.dataframe(style_cols(disp.style, {"Weight": f_pct(1, scale=100),
+                                             "Risk %": f_pct(1, scale=100)}),
+                     width="stretch", hide_index=True)
     st.caption("Compare 'Risk %' to 'Weight': funds where risk exceeds weight are "
                "the volatile / highly-correlated drivers of portfolio risk.")
 

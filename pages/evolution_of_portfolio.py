@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 
 from config import FUND_COLORS
 from components.fund_filter import render_fund_filter
+from utils.formatting import f_eur, f_date, style_cols
 from components.styling import (
     hex_to_rgb,
     daily_change_style,
@@ -361,13 +362,6 @@ def compute_daily_holdings_delta(hist_asc, filter_funds, qty_prev_df):
     return out
 
 
-def _fmt_signed_eur(v) -> str:
-    if pd.isna(v):
-        return ""
-    sign = "+" if v > 0 else "-" if v < 0 else ""
-    return f"{sign}€{abs(v):,.2f}"
-
-
 def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, tx_sorted):
     """Tabella Δ € giornaliera per fondo + totale, stile tabella Historical Data."""
     st.subheader("📈 Portfolio Market Value Evolution - Daily Holdings Value")
@@ -411,11 +405,12 @@ def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, tx_sorted):
     }
     tx_any = set().union(*tx_dates_by_fund.values()) if tx_dates_by_fund else set()
 
+    # Valori numerici + testo da Styler.format => ordinamento per valore reale
     total_col = "Daily Total Δ (€)"
-    display = pd.DataFrame({"Date": date_str})
+    display = pd.DataFrame({"Date": delta_df["date"].dt.normalize()})
     for fund in filter_funds:
-        display[fund] = delta_df[fund].apply(_fmt_signed_eur)
-    display[total_col] = delta_df["Total"].apply(_fmt_signed_eur)
+        display[fund] = delta_df[fund].values
+    display[total_col] = delta_df["Total"].values
 
     def _direction(v):
         if pd.isna(v) or abs(v) < 0.005:
@@ -439,6 +434,8 @@ def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, tx_sorted):
         return out
 
     styler = display.style.apply(_style_col, subset=filter_funds + [total_col], axis=0)
+    styler = styler.format(f_eur(signed=True), subset=filter_funds + [total_col], na_rep="")
+    styler = style_cols(styler, {"Date": f_date("%Y-%m-%d")})
     st.dataframe(styler, width="stretch", hide_index=True)
 
 

@@ -127,3 +127,90 @@ def format_delta_qty(delta_qty, fund: str, fund_qty_decimals: dict) -> float | N
     dp = fund_qty_decimals.get(fund, 3)
     rounded = round(delta_qty, dp)
     return 0.0 if abs(rounded) < 10 ** (-dp) else rounded
+
+
+# ---------------------------------------------------------------------------
+# Formatter per tabelle ordinabili
+# ---------------------------------------------------------------------------
+# Le tabelle tengono i valori NUMERICI e delegano il testo mostrato a
+# Styler.format(...). st.dataframe ordina così per valore reale (−140.45 <
+# −54.12 < 0.50 < 84.76 < 411.90) pur mostrando "€-140.45", "+35.43%", ecc.
+# Una cella già convertita in stringa, invece, viene ordinata alfabeticamente
+# ("411.90" prima di "84.76"), che era il bug.
+#
+# Ogni factory restituisce una funzione valore -> stringa. I valori mancanti
+# (NaN) non passano dal formatter: si usa na_rep in Styler.format.
+
+def _sign(v: float, signed: bool) -> str:
+    if not signed:
+        return "-" if v < 0 else ""
+    return "+" if v > 0 else "-" if v < 0 else ""
+
+
+def f_eur(dp: int = 2, signed: bool = False, thousands: bool = True,
+          space: bool = False, sign_after_symbol: bool = False):
+    """€: "€1,234.56"; signed -> "+€48.55" / "-€31.18".
+
+    sign_after_symbol=True -> "€+48.55" / "€-31.18" (stile P/L storico).
+    space=True -> "€ 1,234.56".
+    """
+    sym = "€ " if space else "€"
+    num_fmt = f"{{:{',' if thousands else ''}.{dp}f}}"
+
+    def fmt(v):
+        v = float(v)
+        s = _sign(v, signed)
+        body = num_fmt.format(abs(v))
+        return f"{sym}{s}{body}" if sign_after_symbol else f"{s}{sym}{body}"
+    return fmt
+
+
+def f_pct(dp: int = 2, signed: bool = False, scale: float = 1.0):
+    """%: "35.43%" / signed "+35.43%". scale=100 per frazioni (0.1345 -> 13.45%)."""
+    def fmt(v):
+        v = float(v) * scale
+        return f"{_sign(v, signed)}{abs(v):.{dp}f}%"
+    return fmt
+
+
+def f_num(dp: int = 2, signed: bool = False, thousands: bool = False):
+    """Numero semplice: "1199.76" / signed "+0.01"."""
+    num_fmt = f"{{:{',' if thousands else ''}.{dp}f}}"
+
+    def fmt(v):
+        v = float(v)
+        return f"{_sign(v, signed)}{num_fmt.format(abs(v))}"
+    return fmt
+
+
+def f_qty(dp: int = 3):
+    """Quantità senza zeri finali (come format_qty): "4.588", "23.8", "23"."""
+    return lambda v: format_qty(v, dp)
+
+
+def f_date(pattern: str = "%Y-%m-%d"):
+    """Date/Timestamp -> stringa (ordinamento cronologico sul valore)."""
+    return lambda v: pd.Timestamp(v).strftime(pattern)
+
+
+def sign_bg(v, alpha: float = 0.12, zero_neutral: bool = True, eps: float = 0.0) -> str:
+    """Sfondo verde/rosso in base al segno (stringa CSS, vuota se neutro/NaN)."""
+    if v is None or pd.isna(v):
+        return ""
+    if zero_neutral and abs(v) <= eps:
+        return ""
+    return (f"background-color: rgba(46,160,67,{alpha});" if v > 0 or (not zero_neutral and v == 0)
+            else f"background-color: rgba(248,81,73,{alpha});")
+
+
+def style_cols(styler, formats: dict, na_rep: str | None = None):
+    """Styler.format limitato alle SOLE colonne del dict.
+
+    Attenzione: styler.format({...}) senza subset riporta al formato di default
+    tutte le altre colonne, cancellando i format applicati prima. Usare sempre
+    questa funzione per i format a dizionario.
+    """
+    formats = {c: f for c, f in formats.items() if c in styler.data.columns}
+    if not formats:
+        return styler
+    return styler.format(formats, subset=list(formats), na_rep=na_rep)
