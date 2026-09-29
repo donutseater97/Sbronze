@@ -19,7 +19,12 @@ from datetime import date, datetime
 
 from config import FUND_COLORS, FUNDS_FILE, HISTORICAL_FILE, load_historical_prices
 from components.fund_filter import render_fund_filter
-from components.styling import hex_to_rgb
+from components.styling import (
+    daily_change_style,
+    fund_header_css,
+    DAILY_WINDOW_OPTIONS,
+    DAILY_WINDOW_DAYS,
+)
 from components.chart_helpers import (
     apply_standard_xaxis,
     get_plotly_config,
@@ -886,8 +891,8 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
     # la finestra temporale (default 1M) e usiamo UNA sola passata di stile con
     # COLORE DI SFONDO cella (verde/rosso) invece del colore font.
     total_rows = len(historical_data_df)
-    win_opts = ["1M", "3M", "6M", "1Y", "Max"]
-    win_days = {"1M": 30, "3M": 91, "6M": 182, "1Y": 365, "Max": None}
+    win_opts = DAILY_WINDOW_OPTIONS
+    win_days = DAILY_WINDOW_DAYS
     choice = st.radio(
         "Range", win_opts, index=0, horizontal=True,
         help="Time window of rows to display (styled per-cell, so shorter is faster).",
@@ -898,13 +903,7 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
     st.caption(f"Showing {n_rows} of {total_rows} rows (most recent first).")
 
     # CSS per header colorati
-    header_css = "<style>\ntable th { font-weight: 600 !important; }\n"
-    header_css += "table th:first-child { background-color: rgba(100, 100, 100, 0.3) !important; }\n"
-    for idx, fund in enumerate(selected_funds, start=1):
-        r, g, b = hex_to_rgb(FUND_COLORS.get(fund, "#999999"))
-        header_css += f"table th:nth-child({idx+1}) {{ background-color: rgba({r}, {g}, {b}, 0.3) !important; }}\n"
-    header_css += "</style>\n"
-    st.markdown(header_css, unsafe_allow_html=True)
+    st.markdown(fund_header_css(selected_funds, FUND_COLORS), unsafe_allow_html=True)
 
     display_df = historical_data_df.copy()
 
@@ -934,30 +933,14 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
         out = []
         n = len(display_df)
         for i in range(n):
-            base = ""
             is_tx = _dates_list[i] in tx_dates
+            direction = 0
             if i < n - 1:
                 cur = raw.iloc[i]
                 prev = raw.iloc[i + 1]
                 if pd.notna(cur) and pd.notna(prev) and cur != prev:
-                    up = cur > prev
-                    # Palette tenue (come Transaction History, alpha 0.12) per la
-                    # variazione giornaliera; molto più forte (0.35) sui giorni di
-                    # transazione, per farli risaltare.
-                    alpha = 0.35 if is_tx else 0.12
-                    if up:
-                        base = f"background-color: rgba(46,160,67,{alpha});"
-                    else:
-                        base = f"background-color: rgba(248,81,73,{alpha});"
-                elif is_tx:
-                    # Transazione in un giorno senza variazione di prezzo: evidenzia
-                    # comunque con un tono neutro forte.
-                    base = "background-color: rgba(230,237,243,0.14);"
-            elif is_tx:
-                base = "background-color: rgba(230,237,243,0.14);"
-            # Bordo per i giorni di transazione (sovrapposto al colore variazione)
-            if is_tx:
-                base += "box-shadow: inset 0 0 0 2px rgba(230,237,243,0.55);"
+                    direction = 1 if cur > prev else -1
+            base = daily_change_style(direction, is_tx)
             out.append(base)
         return out
 

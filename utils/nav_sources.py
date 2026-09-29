@@ -59,39 +59,52 @@ MORNINGSTAR_TOKENS = [
 ]
 
 
-def _morningstar_get(path_and_query: str, timeout: int = 25) -> requests.Response:
+def _morningstar_get(path_and_query: str, timeout: int = 25, retries: int = 2) -> requests.Response:
     """GET su Morningstar provando host×token finché uno risponde 200 con corpo.
 
     Args:
         path_and_query: parte dopo il token, es.
             "/timeseries_price/{TOKEN}?id=...": passare "{TOKEN}" come
             segnaposto letterale, verrà sostituito con ciascun token.
+        retries: tentativi extra sull'host live per errori transitori
+            (timeout, connessione, 5xx) prima di passare alla combinazione
+            successiva. Gli host storici non vengono ritentati.
     Returns:
         requests.Response valida (status 200, corpo non vuoto).
     Raises:
         RuntimeError se nessuna combinazione host/token funziona.
     """
-    last_err = None
+    errors = []
     for host in MORNINGSTAR_HOSTS:
+        attempts = 1 + (retries if host == MORNINGSTAR_HOSTS[0] else 0)
         for token in MORNINGSTAR_TOKENS:
             url = f"https://{host}" + path_and_query.replace("{TOKEN}", token)
-            try:
-                r = requests.get(url, headers=_HEADERS, timeout=timeout, allow_redirects=False)
-            except Exception as e:  # rete/timeout: prova la combinazione successiva
-                last_err = f"{host}/{token}: {type(e).__name__}"
-                continue
-            # Redirect (301/302) o "accepted" vuoto (202) => host non più valido
-            if r.status_code in (301, 302, 202) or not r.content:
-                last_err = f"{host}/{token}: status {r.status_code}, {len(r.content)} bytes"
-                continue
-            if r.status_code == 200 and ("WebServiceException" in r.text[:200]):
-                # token rifiutato per questo id — prova il prossimo token
-                last_err = f"{host}/{token}: WebServiceException"
-                continue
-            if r.status_code == 200:
-                return r
-            last_err = f"{host}/{token}: status {r.status_code}"
-    raise RuntimeError(f"Nessun host/token Morningstar valido ({last_err})")
+            for attempt in range(attempts):
+                try:
+                    r = requests.get(url, headers=_HEADERS, timeout=timeout, allow_redirects=False)
+                except requests.RequestException as e:
+                    errors.append(f"{host}/{token}: {type(e).__name__}")
+                    if attempt + 1 < attempts:
+                        time.sleep(1.5 * (attempt + 1))
+                        continue
+                    break
+                if r.status_code >= 500 and attempt + 1 < attempts:
+                    errors.append(f"{host}/{token}: status {r.status_code}")
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                # Redirect (301/302) o "accepted" vuoto (202) => host non più valido
+                if r.status_code in (301, 302, 202) or not r.content:
+                    errors.append(f"{host}/{token}: status {r.status_code}, {len(r.content)} bytes")
+                elif r.status_code == 200 and "WebServiceException" in r.text[:200]:
+                    # token rifiutato — prova il prossimo token
+                    errors.append(f"{host}/{token}: WebServiceException")
+                elif r.status_code == 200:
+                    return r
+                else:
+                    errors.append(f"{host}/{token}: status {r.status_code}")
+                break
+    # Il primo errore sull'host live è di solito il più informativo
+    raise RuntimeError("Nessun host/token Morningstar valido (" + "; ".join(errors[:3]) + ")")
 
 
 def fetch_morningstar_nav(msid: str, fund_name: str, start: str = "1990-01-01") -> pd.DataFrame:
@@ -124,6 +137,57 @@ def fetch_morningstar_details_xml(msid: str, timeout: int = 30) -> str:
         "&currencyId=EUR&languageId=it-IT"
     )
     return _morningstar_get(path, timeout=timeout).text
+
+
+# =============================================================================
+# MORNINGSTAR — API del sito globale (sal-service)
+# =============================================================================
+#
+# È l'API che alimenta le pagine prodotto di global.morningstar.com. Rispetto
+# all'endpoint security_details di lt.morningstar.com riceve prima i
+# breakdown aggregati (settori, asset allocation): per alcuni fondi è
+# risultato un mese più avanti. Le partecipazioni complete, invece, sono
+# risultate identiche su entrambi gli endpoint. Si usa quindi solo come
+# overlay per i breakdown più recenti.
+#
+# Richiede il secId Morningstar (InvestmentVehicle/@_Id nell'XML, es.
+# "F00000VKNA"), NON il performance id "0P..." usato come Ticker.
+# La chiave è quella pubblica incorporata nel frontend del sito: come i
+# token sopra, non c'è garanzia di permanenza.
+MORNINGSTAR_GLOBAL_BASE = "https://api-global.morningstar.com/sal-service/v1/fund"
+MORNINGSTAR_GLOBAL_KEYS = ["lstzFDEOhfFNMLikKa0am9mgEKLBl49T"]
+
+
+def fetch_morningstar_global(component: str, sec_id: str, timeout: int = 20) -> dict:
+    """GET JSON su sal-service, es. component="process/asset/v2".
+
+    Raises:
+        RuntimeError se nessuna chiave restituisce un JSON valido.
+    """
+    url = f"{MORNINGSTAR_GLOBAL_BASE}/{component}/{sec_id}/data"
+    params = {"languageId": "en", "locale": "en", "clientId": "MDC",
+              "benchmarkId": "category", "version": "4.65.0"}
+    last_err = None
+    for key in MORNINGSTAR_GLOBAL_KEYS:
+        for attempt in range(2):
+            try:
+                r = requests.get(url, params=params, timeout=timeout,
+                                 headers={**_HEADERS, "apikey": key})
+            except requests.RequestException as e:
+                last_err = type(e).__name__
+                time.sleep(1.0)
+                continue
+            if r.status_code == 200:
+                try:
+                    return r.json()
+                except ValueError:
+                    last_err = "invalid JSON"
+                    break
+            last_err = f"status {r.status_code}"
+            if r.status_code < 500:
+                break
+            time.sleep(1.0)
+    raise RuntimeError(f"Morningstar global API {component}: {last_err}")
 
 
 # =============================================================================

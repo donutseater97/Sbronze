@@ -15,12 +15,27 @@ import plotly.graph_objects as go
 
 from config import FUND_COLORS
 from components.fund_filter import render_fund_filter
-from components.styling import hex_to_rgb
+from components.styling import (
+    hex_to_rgb,
+    daily_change_style,
+    fund_header_css,
+    DAILY_WINDOW_OPTIONS,
+    DAILY_WINDOW_DAYS,
+)
 from components.chart_helpers import (
     apply_standard_xaxis,
     get_plotly_config,
     RANGE_SELECTOR_BUTTONS_SHORT,
 )
+
+
+# Layout comune per i grafici a mezza larghezza: stessa altezza per allineare
+# le righe della griglia, legenda orizzontale sotto il range slider (in alto
+# si sovrapporrebbe ai bottoni del range selector su colonne strette).
+HALF_CHART_HEIGHT = 520
+HALF_LEGEND = dict(orientation="h", yanchor="top", y=-0.32, xanchor="left", x=0,
+                   font=dict(size=11))
+HALF_MARGIN = dict(l=10, r=10, t=40, b=10)
 
 
 def evolution_of_portfolio(
@@ -91,21 +106,23 @@ def evolution_of_portfolio(
 
     st.divider()
 
-    # ===== 2. GRAFICO FUNDS NAV EVOLUTION =====
-    _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund)
+    # ===== 2-4. GRAFICI SECONDARI: griglia a 2 colonne =====
+    # Solo "Absolute and % Change by Fund" resta a tutta larghezza; gli altri
+    # grafici occupano metà riga ciascuno.
+    row1_l, row1_r = st.columns(2, gap="medium")
+    with row1_l:
+        _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund)
+    with row1_r:
+        _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transactions)
+
+    row2_l, _row2_r = st.columns(2, gap="medium")
+    with row2_l:
+        _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transactions, first_tx_date_by_fund)
 
     st.divider()
 
-    # ===== 3. GRAFICO PORTFOLIO MARKET VALUE EVOLUTION =====
-    _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transactions)
-
-    # ===== 4. GRAFICO PORTFOLIO COMPOSITION =====
-    _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transactions, first_tx_date_by_fund)
-
-    st.divider()
-
-    # ===== 5. TABELLA MARKET VALUE EVOLUTION (in fondo) =====
-    _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund)
+    # ===== 5. TABELLA MARKET VALUE EVOLUTION (in fondo, tutta larghezza) =====
+    _render_market_value_table(hist_asc, filter_funds, qty_prev_df, tx_sorted)
 
 
 # =============================================================================
@@ -290,6 +307,7 @@ def _render_revenue_pnl_bar(hist_asc, filter_funds, transactions):
 def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
     """Grafico lineare NAV per fondo."""
     st.subheader("📊 Funds NAV Evolution Chart")
+    st.caption("Daily NAV of each fund, starting from your first purchase of that fund")
     fig = go.Figure()
     pnl_asc = hist_asc.sort_values("date", ascending=True).reset_index(drop=True)
 
@@ -305,10 +323,9 @@ def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
         ))
 
     fig.update_layout(
-        height=500, hovermode="x unified", xaxis_title="Date", yaxis_title="NAV (€)",
-        template="plotly_white", showlegend=True,
-        legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.01),
-        dragmode="pan",
+        height=HALF_CHART_HEIGHT, hovermode="x unified", xaxis_title="", yaxis_title="NAV (€)",
+        template="plotly_white", showlegend=True, legend=HALF_LEGEND,
+        dragmode="pan", margin=HALF_MARGIN,
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
     if privacy_on():
@@ -316,83 +333,113 @@ def _render_funds_nav_chart(hist_asc, filter_funds, first_tx_date_by_fund):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, first_tx_date_by_fund):
+def compute_daily_holdings_delta(hist_asc, filter_funds, qty_prev_df):
+    """Variazione giornaliera € del controvalore, SOLO effetto prezzo (NAV).
+
+    Per ogni fondo:  Δ_t = qty_{t-1} × (NAV_t − NAV_{t-1})
+    dove qty_{t-1} è la quantità detenuta a fine giornata precedente: le quote
+    comprate il giorno t (al NAV del giorno t) non maturano variazione in t.
+    NAV_{t-1} è l'ultimo NAV valido precedente (robusto a buchi nei dati).
+
+    Il totale è la SOMMA dei Δ per fondo, quindi esclude i nuovi versamenti.
+    (Il vecchio totale era MV_t − MV_{t-1} e includeva gli acquisti: da qui
+    i giorni con tutti i fondi in rosso e totale in verde.)
+
+    Returns:
+        DataFrame con colonna "date", una colonna per fondo e "Total".
+    """
+    out = hist_asc[["date"]].copy().reset_index(drop=True)
+    for fund in filter_funds:
+        price = pd.to_numeric(hist_asc[fund], errors="coerce").reset_index(drop=True)
+        prev_price = price.ffill().shift(1)
+        qty = qty_prev_df[fund].reset_index(drop=True)
+        delta = qty * (price - prev_price)
+        # Nessuna quota detenuta => nessuna variazione (anche se il NAV manca)
+        delta = delta.where(qty != 0, 0.0)
+        out[fund] = delta
+    out["Total"] = out[filter_funds].sum(axis=1, min_count=1)
+    return out
+
+
+def _fmt_signed_eur(v) -> str:
+    if pd.isna(v):
+        return ""
+    sign = "+" if v > 0 else "-" if v < 0 else ""
+    return f"{sign}€{abs(v):,.2f}"
+
+
+def _render_market_value_table(hist_asc, filter_funds, qty_prev_df, tx_sorted):
+    """Tabella Δ € giornaliera per fondo + totale, stile tabella Historical Data."""
+    st.subheader("📈 Portfolio Market Value Evolution - Daily Holdings Value")
     if privacy_on():
-        st.subheader("📈 Portfolio Market Value Evolution - Daily Holdings Value")
         st.info("🙈 Tabella nascosta in privacy mode (contiene solo valori in €).")
         return
-    """Tabella Market Value giornaliero con variazione € per fondo."""
-    st.subheader("📈 Portfolio Market Value Evolution - Daily Holdings Value")
-    st.caption("Shows the market value of your holdings (quantity held × daily NAV) with € change from previous day")
+    st.caption(
+        "Daily € change of your holdings from NAV movement only "
+        "(quantity held at the previous close × NAV change). New contributions "
+        "are excluded, so the Total is the sum of the fund columns."
+    )
 
-    mv_df = hist_asc[["date"]].copy()
+    delta_df = compute_daily_holdings_delta(hist_asc, filter_funds, qty_prev_df)
+
+    # Parti dal primo giorno in cui c'è qualcosa in portafoglio
+    held = (qty_prev_df[filter_funds].reset_index(drop=True) != 0).any(axis=1)
+    if not held.any():
+        st.info("No holdings for the selected funds yet.")
+        return
+    delta_df = delta_df[held.values].copy()
+
+    delta_df = delta_df.sort_values("date", ascending=False).reset_index(drop=True)
+    total_rows = len(delta_df)
+    choice = st.radio(
+        "Range", DAILY_WINDOW_OPTIONS, index=0, horizontal=True,
+        key="mv_table_range",
+        help="Time window of rows to display (styled per-cell, so shorter is faster).",
+    )
+    days = DAILY_WINDOW_DAYS[choice]
+    n_rows = total_rows if days is None else min(days, total_rows)
+    delta_df = delta_df.head(n_rows).reset_index(drop=True)
+    st.caption(f"Showing {n_rows} of {total_rows} rows (most recent first).")
+
+    st.markdown(fund_header_css(filter_funds, FUND_COLORS), unsafe_allow_html=True)
+
+    # Date transazioni per fondo (evidenziate come in Historical Data)
+    date_str = delta_df["date"].dt.strftime("%Y-%m-%d")
+    tx_dates_by_fund = {
+        f: set(tx_sorted.loc[tx_sorted["Fund"] == f, "Date"].dt.strftime("%Y-%m-%d"))
+        for f in filter_funds
+    }
+    tx_any = set().union(*tx_dates_by_fund.values()) if tx_dates_by_fund else set()
+
+    total_col = "Daily Total Δ (€)"
+    display = pd.DataFrame({"Date": date_str})
     for fund in filter_funds:
-        price = pd.to_numeric(hist_asc[fund], errors="coerce")
-        qty = qty_prev_df[fund]
-        mv_df[f"{fund} (€)"] = qty * price
-        mv_df[f"{fund} (€) Δ"] = (qty * price) - (qty * price.shift(1))
+        display[fund] = delta_df[fund].apply(_fmt_signed_eur)
+    display[total_col] = delta_df["Total"].apply(_fmt_signed_eur)
 
-    # Totale portafoglio
-    total_mv = pd.DataFrame([mv_df[f"{f} (€)"] for f in filter_funds]).sum(axis=0)
-    mv_df["Daily MV Total (€)"] = total_mv
-    mv_df["Daily MV Total Δ (€)"] = total_mv - total_mv.shift(1)
+    def _direction(v):
+        if pd.isna(v) or abs(v) < 0.005:
+            return 0
+        return 1 if v > 0 else -1
 
-    # Display decrescente
-    mv_display = mv_df.sort_values("date", ascending=False).reset_index(drop=True)
-    display = mv_display[["date"]].copy()
-    display["Date"] = display["date"].dt.strftime("%Y-%m-%d")
-    display = display.drop(columns=["date"])
+    dates_list = date_str.tolist()
 
-    for fund in filter_funds:
-        first_date = first_tx_date_by_fund.get(fund)
-        if first_date:
-            first_date = pd.to_datetime(first_date)
+    def _style_col(column):
+        name = column.name
+        if name == total_col:
+            raw, txs = delta_df["Total"], tx_any
+        else:
+            raw, txs = delta_df[name], tx_dates_by_fund.get(name, set())
+        out = []
+        for i in range(len(display)):
+            css = daily_change_style(_direction(raw.iloc[i]), dates_list[i] in txs)
+            if name == total_col:
+                css += "font-weight: 600;"
+            out.append(css)
+        return out
 
-            def fmt_mv(idx, fn=fund):
-                delta = mv_display[f"{fn} (€) Δ"].iloc[idx]
-                if pd.isna(delta):
-                    return "-"
-                sign = "+" if delta > 0 else ""
-                return f"{sign}€{delta:.2f}"
-
-            display[fund] = [
-                fmt_mv(i) if pd.to_datetime(mv_display["date"].iloc[i]) >= first_date else "-"
-                for i in range(len(mv_display))
-            ]
-
-    # Totale giornaliero
-    def fmt_total(idx):
-        delta = mv_display["Daily MV Total Δ (€)"].iloc[idx]
-        if pd.isna(delta):
-            return "-"
-        sign = "+" if delta > 0 else ""
-        return f"{sign}€{delta:.2f}"
-
-    display["Daily Total Δ (€)"] = [fmt_total(i) for i in range(len(mv_display))]
-
-    # Stile
-    def style_fn(row):
-        styles = [""] * len(row)
-        idx = row.name
-        for col_idx, fund in enumerate(filter_funds, start=1):
-            delta = mv_display[f"{fund} (€) Δ"].iloc[idx]
-            if pd.isna(delta) or delta == 0:
-                pass
-            elif delta > 0:
-                styles[col_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f;"
-            else:
-                styles[col_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e;"
-        # Colonna totale
-        total_idx = len(filter_funds) + 1
-        daily_val = mv_display["Daily MV Total Δ (€)"].iloc[idx]
-        if pd.notna(daily_val) and daily_val != 0:
-            if daily_val > 0:
-                styles[total_idx] = "background-color: rgba(107, 203, 119, 0.15); color: #2d6a3f; font-weight: 600;"
-            else:
-                styles[total_idx] = "background-color: rgba(226, 106, 106, 0.15); color: #8b2e2e; font-weight: 600;"
-        return styles
-
-    st.dataframe(display.style.apply(style_fn, axis=1), width="stretch", hide_index=True)
+    styler = display.style.apply(_style_col, subset=filter_funds + [total_col], axis=0)
+    st.dataframe(styler, width="stretch", hide_index=True)
 
 
 def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transactions):
@@ -461,7 +508,9 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
         bgcolor="rgba(255,255,255,0)",
     )
 
-    # Linee per singolo fondo
+    # Linee per singolo fondo (le etichette finali si disegnano dopo, quando
+    # il range Y è noto, per poterle distanziare senza sovrapposizioni)
+    fund_labels = []
     for fund in filter_funds:
         col = f"{fund} MV (€)"
         if col in mv_df.columns:
@@ -473,14 +522,7 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
                 hovertemplate=(f"<b>{fund}</b><extra></extra>" if privacy_on()
                                else f"<b>{fund}</b>: €%{{y:,.2f}}<extra></extra>"),
             ))
-            last_fund_mv = mv_df[col].iloc[-1]
-            fig.add_annotation(
-                x=latest_date, y=last_fund_mv, text=mask_text(f"€{last_fund_mv:,.0f}"),
-                showarrow=False, xanchor="left", xshift=10,
-                font=dict(size=13, color=color),
-                bordercolor=color, borderwidth=1.5, borderpad=4,
-                bgcolor="rgba(255,255,255,0)",
-            )
+            fund_labels.append((fund, color, float(mv_df[col].iloc[-1])))
 
     # Range Y con padding
     all_vals = [mv_df["Daily MV (€)"].min(), mv_df["Daily MV (€)"].max()]
@@ -491,13 +533,14 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
     max_mv = max(all_vals) if all_vals else 1000
     min_mv = min(all_vals) if all_vals else 0
     padding = (max_mv - min_mv) * 0.05
+    _add_spread_end_labels(fig, latest_date, fund_labels, last_mv,
+                           y_range=(min_mv - padding, max_mv + padding))
 
     fig.update_layout(
-        height=600, hovermode="x unified", xaxis_title="", yaxis_title="Market Value (€)",
-        template="plotly_white", showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=HALF_CHART_HEIGHT, hovermode="x unified", xaxis_title="", yaxis_title="Market Value (€)",
+        template="plotly_white", showlegend=True, legend=HALF_LEGEND,
         dragmode="pan", uirevision="portfolio_mv_evolution",
-        newshape=dict(line_color="#888888"), margin=dict(r=36),
+        newshape=dict(line_color="#888888"), margin={**HALF_MARGIN, "r": 95},
         yaxis=dict(range=[min_mv - padding, max_mv + padding]),
     )
     apply_standard_xaxis(fig, RANGE_SELECTOR_BUTTONS_SHORT)
@@ -508,6 +551,50 @@ def _render_portfolio_market_value(hist_asc, filter_funds, qty_prev_df, transact
     if privacy_on():
         fig.update_yaxes(showticklabels=False, title_text="Market Value (€, nascosto)")
     st.plotly_chart(fig, use_container_width=True, config=get_plotly_config("portfolio_mv_evolution"))
+
+
+def _add_spread_end_labels(fig, x, labels, total_value, y_range,
+                           min_gap_px=20, plot_px=None):
+    """Etichette "ultimo valore" per fondo, distanziate verticalmente.
+
+    Con la griglia a mezza altezza i valori finali dei fondi sono vicini e i
+    riquadri si sovrapponevano. Le etichette vengono ordinate per valore e
+    spinte a una distanza minima (in pixel, convertita in unità dati); una
+    linea sottile collega ogni etichetta al punto reale.
+    """
+    if not labels:
+        return
+    lo, hi = y_range
+    span = (hi - lo) or 1.0
+    if plot_px is None:
+        # altezza utile ≈ figura − margini − range slider/legenda
+        plot_px = HALF_CHART_HEIGHT * 0.58
+    gap = min_gap_px * span / plot_px
+    # L'etichetta del totale è un ostacolo fisso: nessuna etichetta fondo
+    # deve finirle addosso.
+    items = sorted(labels, key=lambda t: t[2])
+    placed = []
+    prev = None
+    for fund, color, val in items:
+        y = val if prev is None else max(val, prev + gap)
+        if abs(y - total_value) < gap:
+            y = total_value - gap if y < total_value else total_value + gap
+        placed.append((fund, color, val, y))
+        prev = y
+    # Se si esce dal range in alto, trasla tutto verso il basso
+    overflow = placed[-1][3] - (hi - gap / 2) if placed else 0
+    if overflow > 0:
+        placed = [(f, c, v, y - overflow) for f, c, v, y in placed]
+    for fund, color, val, y in placed:
+        ay_px = -(y - val) * plot_px / span   # offset testo in pixel (su = negativo)
+        fig.add_annotation(
+            x=x, y=val, text=mask_text(f"€{val:,.0f}"),
+            showarrow=True, arrowhead=0, arrowwidth=1, arrowcolor=color,
+            ax=24, ay=ay_px, axref="pixel", ayref="pixel",
+            xanchor="left", font=dict(size=12, color=color),
+            bordercolor=color, borderwidth=1.5, borderpad=3,
+            bgcolor="rgba(13,17,23,0.85)",
+        )
 
 
 def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transactions, first_tx_date_by_fund):
@@ -596,9 +683,8 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
         ))
 
     fig.update_layout(
-        height=500, hovermode="x unified", xaxis_title="Date", yaxis_title="Composition (%)",
-        template="plotly_white", showlegend=True,
-        legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.01),
+        height=HALF_CHART_HEIGHT, hovermode="x unified", xaxis_title="", yaxis_title="Composition (%)",
+        template="plotly_white", showlegend=True, legend=HALF_LEGEND, margin=HALF_MARGIN,
         dragmode="pan", uirevision="portfolio_composition",
         yaxis=dict(range=[0, 100], ticksuffix="%"),
     )

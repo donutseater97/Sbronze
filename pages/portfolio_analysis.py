@@ -30,6 +30,7 @@ import plotly.graph_objects as go
 
 from config import FUND_COLORS
 from components.chart_helpers import get_plotly_config
+from components.styling import hex_to_rgb
 from utils.privacy import render_page_header
 
 _ANALYTICS_DIR = os.path.join(
@@ -353,16 +354,45 @@ def _render_rolling_corr(returns_daily, funds, window):
 
 
 def _render_heatmap(corr):
+    """Heatmap di correlazione con nomi fondo in alto e a sinistra.
+
+    Le etichette sono annotazioni "a pillola" con il colore del fondo (stessa
+    convenzione di filtri e tabelle), perché i tick label Plotly non
+    supportano uno sfondo per singola etichetta.
+    """
     z = corr.values
+    cols = [str(c) for c in corr.columns]
+    rows = [str(r) for r in corr.index]
     fig = go.Figure(go.Heatmap(
-        z=z, x=list(corr.columns), y=list(corr.index),
+        z=z, x=cols, y=rows,
         colorscale="RdBu_r", zmin=-1, zmax=1, zmid=0,
         text=[[f"{v:.2f}" for v in row] for row in z],
-        texttemplate="%{text}", textfont=dict(size=12), colorbar=dict(title="ρ")))
-    fig.update_layout(height=420, template="plotly_dark", paper_bgcolor=_PAGE_BG,
+        texttemplate="%{text}", textfont=dict(size=12), colorbar=dict(title="ρ"),
+        hovertemplate="%{y} ~ %{x}: %{z:.2f}<extra></extra>"))
+
+    def _pill(fund):
+        r, g, b = hex_to_rgb(FUND_COLORS.get(fund, "#999999"))
+        return dict(bgcolor=f"rgba({r},{g},{b},0.35)", bordercolor=f"rgb({r},{g},{b})",
+                    borderwidth=1, borderpad=3, showarrow=False,
+                    font=dict(color=_PAGE_TEXT, size=12), text=f"<b>{fund}</b>")
+
+    annotations = []
+    for fund in cols:   # in alto
+        annotations.append(dict(x=fund, xref="x", y=1.0, yref="paper",
+                                yanchor="bottom", yshift=6, **_pill(fund)))
+    for fund in rows:   # a sinistra
+        annotations.append(dict(x=0.0, xref="paper", y=fund, yref="y",
+                                xanchor="right", xshift=-6, **_pill(fund)))
+
+    fig.update_layout(height=440, template="plotly_dark", paper_bgcolor=_PAGE_BG,
                       plot_bgcolor=_PAGE_BG, font=dict(color=_PAGE_TEXT, size=12),
-                      margin=dict(l=60, r=20, t=20, b=40), yaxis_autorange="reversed")
-    st.plotly_chart(fig, width="stretch", config=get_plotly_config("corr_matrix"))
+                      margin=dict(l=90, r=20, t=44, b=10), yaxis_autorange="reversed",
+                      annotations=annotations)
+    fig.update_xaxes(side="top", showticklabels=False)
+    fig.update_yaxes(showticklabels=False)
+    cfg = get_plotly_config("corr_matrix")
+    cfg["edits"] = {**cfg.get("edits", {}), "annotationPosition": False, "annotationText": False}
+    st.plotly_chart(fig, width="stretch", config=cfg)
 
 
 def _render_risk_contribution(cov_d, funds, weights):

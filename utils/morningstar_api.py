@@ -75,20 +75,41 @@ def fetch_security_details_xml(msid: str, timeout: int = 30) -> str:
     return fetch_morningstar_details_xml(msid, timeout=timeout)
 
 
+def _own_portfolio(root: ET.Element) -> ET.Element:
+    """Nodo Portfolio DEL FONDO (PortfolioList/Portfolio).
+
+    L'XML contiene anche Category/Portfolio e Index/Portfolio (medie di
+    categoria e benchmark), con gli stessi tag. Cercare con ".//Tag" su
+    tutto il documento prende il primo match, che per i blocchi assenti nel
+    fondo è quello della CATEGORIA: es. l'esposizione valutaria di EM ed EU
+    arrivava dalla media di categoria. Tutto il parsing va quindi limitato
+    al portafoglio del fondo.
+    """
+    own = root.find("PortfolioList/Portfolio")
+    return own if own is not None else root
+
+
+# Copertura minima (somma pesi delle partecipazioni pubblicate) per stimare
+# l'esposizione valutaria dalle partecipazioni quando il fondo non la pubblica.
+_CCY_FROM_HOLDINGS_MIN_COVERAGE = 80.0
+
+
 def parse_fund_analytics(xml_text: str) -> dict:
     """Estrae i blocchi analitici di un fondo dall'XML security_details.
 
     Returns:
         dict con chiavi: asset_allocation, sectors, stylebox, bond_stylebox,
-        currency, holdings (DataFrame), n_holdings_disclosed.
+        currency, currency_source, holdings (DataFrame), n_holdings_disclosed,
+        sec_id, freshness.
         I valori percentuali sono riferiti al singolo fondo (somma ~100).
     """
     root = ET.fromstring(xml_text)
-    out: dict = {}
+    own = _own_portfolio(root)
+    out: dict = {"sec_id": root.get("_Id")}
 
     # --- Asset allocation (posizione netta) ---
     alloc: dict[str, float] = {}
-    for aa in root.iter("AssetAllocation"):
+    for aa in own.iter("AssetAllocation"):
         if aa.get("Type") == "1" and aa.get("_SalePosition") == "N":
             for b in aa:
                 label = ASSET_CLASS_MAP.get(b.get("Type"), "Altro")
@@ -97,33 +118,25 @@ def parse_fund_analytics(xml_text: str) -> dict:
     out["asset_allocation"] = alloc
 
     # --- Settori azionari (posizione netta) ---
-    sec = root.find(".//GlobalStockSectorBreakdown[@_SalePosition='N']")
+    sec = own.find(".//GlobalStockSectorBreakdown[@_SalePosition='N']")
     out["sectors"] = (
         {SECTOR_NAMES.get(b.get("Type"), b.get("Type")): float(b.text) for b in sec}
         if sec is not None else {}
     )
 
     # --- Style box azionario (9 celle, posizione netta) ---
-    sb = root.find(".//StyleBoxBreakdown[@_SalePosition='N']")
+    sb = own.find(".//StyleBoxBreakdown[@_SalePosition='N']")
     out["stylebox"] = (
         {int(b.get("Type")): float(b.text) for b in sb} if sb is not None else {}
     )
 
     # --- Style box obbligazionario (cella singola da BondStatistics) ---
-    bond_cell = root.find(".//BondStatistics/StyleBox")
+    bond_cell = own.find(".//BondStatistics/StyleBox")
     out["bond_stylebox"] = int(bond_cell.text) if bond_cell is not None and bond_cell.text else None
-
-    # --- Esposizione valutaria (posizione netta, Type B = per valuta) ---
-    ccy: dict[str, float] = {}
-    for ce in root.iter("RiskCurrencyExposure"):
-        if ce.get("_SalePosition") == "N" and ce.get("Type") == "B":
-            ccy = {v.get("CurrencyId"): float(v.text) for v in ce}
-            break
-    out["currency"] = ccy
 
     # --- Partecipazioni pubblicate ---
     rows = []
-    for hd in root.findall(".//Holding/HoldingDetail"):
+    for hd in own.findall(".//Holding/HoldingDetail"):
         def _t(tag):
             el = hd.find(tag)
             return el.text if el is not None else None
@@ -141,30 +154,141 @@ def parse_fund_analytics(xml_text: str) -> dict:
     out["holdings"] = holdings
     out["n_holdings_disclosed"] = len(holdings)
 
+    # --- Esposizione valutaria (posizione netta, Type B = per valuta) ---
+    # 1) dal fondo; 2) se assente, dalle partecipazioni pubblicate quando
+    #    coprono quasi tutto il fondo; 3) altrimenti media di categoria,
+    #    dichiarata come proxy.
+    def _ccy_block(node):
+        for ce in node.iter("RiskCurrencyExposure"):
+            if ce.get("_SalePosition") == "N" and ce.get("Type") == "B":
+                return {v.get("CurrencyId"): float(v.text) for v in ce}
+        return {}
+
+    ccy = _ccy_block(own)
+    ccy_source = "fund"
+    if not ccy:
+        coverage = float(holdings["Weighting"].sum()) if not holdings.empty else 0.0
+        if coverage >= _CCY_FROM_HOLDINGS_MIN_COVERAGE:
+            by_ccy = holdings.dropna(subset=["Currency"]).groupby("Currency")["Weighting"].sum()
+            tot = float(by_ccy.sum())
+            ccy = {c: 100.0 * v / tot for c, v in by_ccy.items()} if tot > 0 else {}
+            ccy_source = f"holdings ({coverage:.0f}% covered)"
+        else:
+            cat = root.find("Category/Portfolio")
+            ccy = _ccy_block(cat) if cat is not None else {}
+            ccy_source = "category proxy" if ccy else "n/a"
+    out["currency"] = ccy
+    out["currency_source"] = ccy_source
+
     # --- Freschezza dei dati (date "as of" pubblicate da Morningstar) ---
     # portfolio_date: data di composizione del portafoglio (holdings/settori),
-    #                 tipicamente aggiornata a cadenza MENSILE con qualche
-    #                 settimana di ritardo.
+    #                 tipicamente aggiornata a cadenza MENSILE con ritardo.
     # nav_date:       data dell'ultimo NAV disponibile (di solito giornaliero).
     # prev_portfolio_date: composizione precedente (per stimare la cadenza).
-    def _find_text(tag):
-        el = root.find(f".//{tag}")
+    def _text(node, path):
+        el = node.find(path)
         return el.text if el is not None and el.text else None
 
-    port = root.find(".//Portfolio")
-    portfolio_date = None
-    if port is not None:
-        d = next(port.iter("Date"), None)
-        portfolio_date = d.text if d is not None and d.text else None
-    nav_el = root.find(".//NetAssetValue")
+    portfolio_date = _text(own, "PortfolioSummary/Date") or _text(own, ".//Date")
+    nav_el = root.find("FundShareClass//NetAssetValue")
+    if nav_el is None:
+        nav_el = root.find(".//NetAssetValue")
     nav_date = nav_el.get("Date") if nav_el is not None else None
     out["freshness"] = {
-        "portfolio_date": portfolio_date,                       # holdings/settori
-        "prev_portfolio_date": _find_text("PreviousPortfolioDate"),
-        "nav_date": nav_date,                                   # ultimo NAV
+        "portfolio_date": portfolio_date,                        # holdings
+        "breakdown_date": portfolio_date,                        # settori / asset alloc.
+        "breakdown_source": "lt.morningstar.com",
+        "prev_portfolio_date": _text(own, ".//PreviousPortfolioDate"),
+        "nav_date": nav_date,                                    # ultimo NAV
+        "latest_on_morningstar": None,                           # verificato via API globale
     }
 
     return out
+
+
+# -----------------------------------------------------------------------------
+# Overlay dall'API globale (breakdown più recenti)
+# -----------------------------------------------------------------------------
+
+_GLOBAL_SECTOR_KEYS = {
+    "basicMaterials": "101", "consumerCyclical": "102", "financialServices": "103",
+    "realEstate": "104", "consumerDefensive": "205", "healthcare": "206",
+    "utilities": "207", "communicationServices": "308", "energy": "309",
+    "industrials": "310", "technology": "311",
+}
+
+
+def _global_asset_label(key: str) -> str:
+    k = key.replace("AssetAlloc", "")
+    if k.endswith("Equity"):
+        return "Azioni"
+    if k in ("Bond", "Convertible"):
+        return "Obbligazioni"
+    if k == "Cash":
+        return "Liquidità"
+    if k == "NotClassified":
+        return "Non Classificato"
+    return "Altro"
+
+
+def fetch_global_breakdowns(sec_id: str) -> dict:
+    """Asset allocation e settori dall'API globale Morningstar.
+
+    Returns:
+        {"portfolio_date": "YYYY-MM-DD" | None, "asset_allocation": {...},
+         "sectors": {...}} con le stesse etichette di parse_fund_analytics.
+    """
+    from utils.nav_sources import fetch_morningstar_global
+
+    asset = fetch_morningstar_global("process/asset/v2", sec_id)
+    pdate = (asset.get("portfolioDate") or "")[:10] or None
+    alloc: dict[str, float] = {}
+    for key, v in (asset.get("allocationMap") or {}).items():
+        try:
+            val = float(v.get("netAllocation"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        label = _global_asset_label(key)
+        alloc[label] = alloc.get(label, 0.0) + val
+
+    sectors: dict[str, float] = {}
+    try:
+        sec = fetch_morningstar_global("portfolio/v2/sector", sec_id)
+        eq = (sec.get("EQUITY") or {}).get("fundPortfolio") or {}
+        if (eq.get("portfolioDate") or "")[:10] == pdate:
+            for key, code in _GLOBAL_SECTOR_KEYS.items():
+                val = eq.get(key)
+                if val:
+                    sectors[SECTOR_NAMES[code]] = float(val)
+    except Exception:
+        sectors = {}
+
+    return {"portfolio_date": pdate, "asset_allocation": alloc, "sectors": sectors}
+
+
+def apply_global_overlay(data: dict, overlay: dict) -> dict:
+    """Sostituisce settori / asset allocation se l'API globale è più recente.
+
+    Holdings, style box ed esposizione valutaria restano quelli dell'XML
+    (l'API globale non li espone o li ha alla stessa data).
+    """
+    fr = data.setdefault("freshness", {})
+    gdate = overlay.get("portfolio_date")
+    fr["latest_on_morningstar"] = max(filter(None, [gdate, fr.get("breakdown_date")]), default=None)
+    base = fr.get("breakdown_date") or ""
+    # Overlay solo se completo: asset allocation + settori (questi ultimi solo
+    # per i fondi che li hanno, cioè non per i bond). Così i due blocchi
+    # restano sempre della stessa data.
+    needs_sectors = bool(data.get("sectors"))
+    complete = bool(overlay.get("asset_allocation")) and (
+        bool(overlay.get("sectors")) or not needs_sectors)
+    if gdate and gdate > base and complete:
+        data["asset_allocation"] = overlay["asset_allocation"]
+        if needs_sectors:
+            data["sectors"] = overlay["sectors"]
+        fr["breakdown_date"] = gdate
+        fr["breakdown_source"] = "global.morningstar.com"
+    return data
 
 
 # -----------------------------------------------------------------------------
