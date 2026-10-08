@@ -20,7 +20,7 @@ from datetime import date, datetime
 
 from config import FUND_COLORS, FUNDS_FILE, HISTORICAL_FILE, load_historical_prices
 from components.fund_filter import render_fund_filter
-from utils.formatting import f_eur
+from utils.formatting import f_eur, f_pct
 from components.styling import (
     daily_change_style,
     fund_header_css,
@@ -876,25 +876,46 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
 
     historical_data_df["date"] = historical_data_df["date"].dt.strftime("%Y-%m-%d")
 
+    # Variazione % giornaliera del NAV, calcolata sull'INTERO storico (prima del
+    # taglio alla finestra, così anche l'ultima riga visibile ha il suo Δ).
+    # Base = ultimo NAV valido precedente (robusto a buchi nei dati), come in
+    # "Absolute and % Change by Fund".
+    pct_df = historical_data_df[["date"]].copy()
+    for f in selected_funds:
+        s_asc = pd.to_numeric(historical_data_df[f], errors="coerce").iloc[::-1]
+        prev = s_asc.ffill().shift(1)
+        pct_df[f] = ((s_asc / prev - 1.0) * 100.0).where(s_asc.notna() & prev.notna()).iloc[::-1]
+
     # La colorazione via pandas Styler è costosa a ogni interazione: limitiamo
     # la finestra temporale (default 1M) e usiamo UNA sola passata di stile con
     # COLORE DI SFONDO cella (verde/rosso) invece del colore font.
     total_rows = len(historical_data_df)
     win_opts = DAILY_WINDOW_OPTIONS
     win_days = DAILY_WINDOW_DAYS
-    choice = st.radio(
-        "Range", win_opts, index=0, horizontal=True,
-        help="Time window of rows to display (styled per-cell, so shorter is faster).",
-    )
+    col_range, col_view = st.columns([3, 2])
+    with col_range:
+        choice = st.radio(
+            "Range", win_opts, index=0, horizontal=True,
+            help="Time window of rows to display (styled per-cell, so shorter is faster).",
+        )
+    with col_view:
+        view = st.segmented_control(
+            "View", ["NAV (€)", "Δ NAV (%)"], default="NAV (€)",
+            key="hist_table_view",
+            help="NAV (€): daily NAV. Δ NAV (%): daily % change of the NAV "
+                 "vs the previous available NAV.",
+        ) or "NAV (€)"
+    pct_view = view == "Δ NAV (%)"
     days = win_days[choice]
     n_rows = total_rows if days is None else min(days, total_rows)
     historical_data_df = historical_data_df.head(n_rows)
+    pct_df = pct_df.head(n_rows)
     st.caption(f"Showing {n_rows} of {total_rows} rows (most recent first).")
 
     # CSS per header colorati
     st.markdown(fund_header_css(selected_funds, FUND_COLORS), unsafe_allow_html=True)
 
-    display_df = historical_data_df.copy()
+    display_df = (pct_df if pct_view else historical_data_df).copy()
 
     # Mappa date transazioni per evidenziazione
     tx_dates_by_fund = {}
@@ -918,12 +939,17 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
             return [""] * len(display_df)
         tx_dates = tx_dates_by_fund.get(col_name, set())
         raw = historical_data_df[col_name]
+        pct = pct_df[col_name]
         out = []
         n = len(display_df)
         for i in range(n):
             is_tx = _dates_list[i] in tx_dates
             direction = 0
-            if i < n - 1:
+            if pct_view:
+                v = pct.iloc[i]
+                if pd.notna(v) and abs(v) >= 0.005:
+                    direction = 1 if v > 0 else -1
+            elif i < n - 1:
                 cur = raw.iloc[i]
                 prev = raw.iloc[i + 1]
                 if pd.notna(cur) and pd.notna(prev) and cur != prev:
@@ -933,7 +959,8 @@ def _render_historical_table(hist_df_display, selected_funds, transactions):
         return out
 
     styler = display_df.style.apply(_style_col, subset=selected_funds, axis=0)
-    styler = styler.format(f_eur(thousands=False), subset=selected_funds, na_rep="")
+    styler = styler.format(f_pct(signed=True) if pct_view else f_eur(thousands=False),
+                           subset=selected_funds, na_rep="")
 
     display_df = display_df[["date"] + selected_funds]
     st.dataframe(styler, use_container_width=True)
