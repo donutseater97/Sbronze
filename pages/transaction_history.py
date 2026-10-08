@@ -5,6 +5,12 @@ Mostra la cronologia completa delle transazioni con:
 - Filtro fondi e filtro per data
 - Tabella dettagliata con contributi, quantità, delta, ecc.
 - Metriche totali (gross contribution, net invested, fees, P/L)
+
+Switch (US (old) → US (a), ecc.): compaiono come due righe con colonna
+"Operation" (⇄ Switch Out / ⇄ Switch In). Non sono versamenti: per loro il
+"Gross Contribution" è il controvalore trasferito (negativo in uscita,
+positivo in entrata), i campi teorici (Δ vs Exp, Quantity theor) sono vuoti
+e i totali "Contributions" contano solo i Buy.
 """
 
 import streamlit as st
@@ -17,6 +23,12 @@ from components.styling import style_fund_cell
 from utils.formatting import (
     get_fund_qty_decimals,
     f_eur, f_pct, f_num, f_qty, f_date, sign_bg, style_cols,
+)
+from utils.transactions import (
+    OP_SWITCH_OUT,
+    is_buy,
+    exit_price_by_fund,
+    operation_label,
 )
 
 
@@ -79,18 +91,31 @@ def transaction_history(
     trans_df = trans_df.sort_values("Date", ascending=False)
 
     # ----- Calcola campi derivati -----
+    # Buy: versamento teorico arrotondato ai 10 € e relativi Δ.
+    # Switch: controvalore trasferito esatto (segno della quantità), Δ vuoti.
+    _buy = is_buy(trans_df)
     trans_df["Reference Period"] = trans_df["Date"].dt.strftime("%Y %b")
     trans_df["Gross Contribution (real)"] = trans_df["Quantity"] * trans_df["Price (€)"] + trans_df["Fees (€)"]
-    trans_df["Gross Contribution (theor)"] = (trans_df["Gross Contribution (real)"] / 10).round() * 10
+    trans_df["Gross Contribution (theor)"] = (
+        ((trans_df["Gross Contribution (real)"] / 10).round() * 10)
+        .where(_buy, trans_df["Gross Contribution (real)"])
+    )
     trans_df["Net Invested"] = trans_df["Quantity"] * trans_df["Price (€)"]
-    trans_df["Δ Net Inv vs Exp"] = trans_df["Net Invested"] - trans_df["Gross Contribution (theor)"] + trans_df["Fees (€)"]
-    trans_df["Quantity (theor)"] = (trans_df["Gross Contribution (theor)"] - trans_df["Fees (€)"]) / trans_df["Price (€)"]
+    trans_df["Δ Net Inv vs Exp"] = (
+        trans_df["Net Invested"] - trans_df["Gross Contribution (theor)"] + trans_df["Fees (€)"]
+    ).where(_buy)
+    trans_df["Quantity (theor)"] = (
+        (trans_df["Gross Contribution (theor)"] - trans_df["Fees (€)"]) / trans_df["Price (€)"]
+    ).where(_buy)
     trans_df["Δ Quantity"] = trans_df["Quantity"] - trans_df["Quantity (theor)"]
     trans_df["Date_str"] = trans_df["Date"].dt.strftime("%Y-%m-%d")
 
     # ----- P/L per transazione (rispetto al NAV più recente del fondo) -----
     # Le fee sono già scontate nella quantità acquistata, quindi il P/L confronta
     # semplicemente il valore attuale della tranche col prezzo pagato.
+    # Fondo uscito via switch (quantità 0): il riferimento è il NAV di uscita,
+    # cioè il P/L realizzato della tranche. La riga Switch Out non ha P/L
+    # (sarebbe un doppio conteggio delle tranche che chiude).
     _latest_nav = {}
     if hist_data_global is not None and len(hist_data_global) > 0 and "date" in hist_data_global.columns:
         _hd = hist_data_global.sort_values("date")
@@ -98,12 +123,14 @@ def transaction_history(
         for _f in transactions["Fund"].unique():
             if _f in _hd.columns and pd.notna(_last.get(_f)):
                 _latest_nav[_f] = float(_last[_f])
+    _latest_nav.update(exit_price_by_fund(transactions))
+    _is_out = trans_df["Operation"] == OP_SWITCH_OUT
     trans_df["_pl_eur"] = trans_df.apply(
         lambda r: r["Quantity"] * (_latest_nav[r["Fund"]] - r["Price (€)"])
-        if r["Fund"] in _latest_nav else float("nan"), axis=1)
+        if r["Fund"] in _latest_nav else float("nan"), axis=1).where(~_is_out)
     trans_df["_pl_pct"] = trans_df.apply(
         lambda r: (_latest_nav[r["Fund"]] / r["Price (€)"] - 1.0) * 100.0
-        if r["Fund"] in _latest_nav and r["Price (€)"] else float("nan"), axis=1)
+        if r["Fund"] in _latest_nav and r["Price (€)"] else float("nan"), axis=1).where(~_is_out)
 
     # Precisione decimale per fondo
     fund_qty_decimals = get_fund_qty_decimals(transactions)
@@ -118,6 +145,8 @@ def transaction_history(
         "Reference Period": trans_df["Date"].dt.to_period("M").dt.to_timestamp(),
         "Date": trans_df["Date"].dt.normalize(),
         "Fund": trans_df["Fund"],
+        "Operation": [operation_label(o, l) for o, l in
+                      zip(trans_df["Operation"], trans_df["Linked Fund"])],
         "Price (€)": trans_df["Price (€)"],
         "Quantity": trans_df["Quantity"],
         "Fees (€)": trans_df["Fees (€)"],
@@ -159,6 +188,9 @@ def transaction_history(
         for col in row.index:
             if col == "Fund":
                 styles.append(style_fund_cell(row["Fund"], FUND_COLORS))
+            elif col == "Operation":
+                styles.append("" if row["Operation"] == "Buy"
+                              else "color: #e0a030; font-style: italic;")
             elif col == "Δ vs Exp":
                 styles.append(sign_bg(_dni_sign.at[i]))
             elif col == "Δ vs Q real":
@@ -192,8 +224,8 @@ def transaction_history(
         for fund, dp in fund_qty_decimals.items():
             rows = display_df.index[display_df["Fund"] == fund]
             if len(rows):
-                styled_df = styled_df.format(f_num(dp), subset=pd.IndexSlice[rows, ["Quantity (theor)"]])
-                styled_df = styled_df.format(f_num(dp, signed=True), subset=pd.IndexSlice[rows, ["Δ vs Q real"]])
+                styled_df = styled_df.format(f_num(dp), subset=pd.IndexSlice[rows, ["Quantity (theor)"]], na_rep="—")
+                styled_df = styled_df.format(f_num(dp, signed=True), subset=pd.IndexSlice[rows, ["Δ vs Q real"]], na_rep="—")
     styled_df = style_cols(styled_df, {"P/L (%)": f_pct(signed=True)}, na_rep="—")
 
     st.dataframe(styled_df, width="stretch", hide_index=True)
@@ -209,11 +241,15 @@ def transaction_history(
     st.markdown("")
     st.markdown("**Totals (based on filters):**")
 
-    total_gross_theor = trans_df["Gross Contribution (theor)"].sum()
-    total_net_invested = trans_df["Net Invested"].sum()
+    # Contributi e P/L approx. contano solo i Buy (versamenti reali): gli
+    # switch spostano denaro già investito tra due fondi. Le fee contano tutte.
+    buys_df = trans_df[is_buy(trans_df)]
+    n_switch_rows = int((~is_buy(trans_df)).sum())
+    total_gross_theor = buys_df["Gross Contribution (theor)"].sum()
+    total_net_invested = buys_df["Net Invested"].sum()
     total_fees = trans_df["Fees (€)"].sum()
     fees_pct = (total_fees / total_gross_theor * 100) if total_gross_theor > 0 else 0.0
-    pl_price_approx = trans_df["Δ Net Inv vs Exp"].sum()
+    pl_price_approx = buys_df["Δ Net Inv vs Exp"].sum()
 
     # P/L Quantity
     hist_data = hist_data_global
@@ -221,7 +257,7 @@ def transaction_history(
     pl_qty_approx_now = 0.0
     if len(hist_data) > 0 and "date" in hist_data.columns:
         latest_date = pd.to_datetime(hist_data["date"]).max()
-        for _, row in trans_df.iterrows():
+        for _, row in buys_df.iterrows():
             fund = row["Fund"]
             dq_raw = row["Δ Quantity"]
             dp = fund_qty_decimals.get(fund, 3)
@@ -235,7 +271,7 @@ def transaction_history(
                     if len(lp) > 0 and pd.notna(lp[0]):
                         pl_qty_approx_now += dq * lp[0]
 
-    num_contributions = len(trans_df)
+    num_contributions = len(buys_df)
 
     # Display totals
     r1c1, r1c2, r1c3 = st.columns(3)
@@ -265,3 +301,9 @@ def transaction_history(
         st.metric(f"P/L Quantity approx. (as of {last_date_str})", pl_qty_display)
     with r2c3:
         st.metric("Number of Contributions", f"{num_contributions}")
+
+    if n_switch_rows:
+        st.caption(f"⇄ {n_switch_rows} switch row(s) in view: excluded from "
+                   "contributions, net invested, P/L approx. and the contribution "
+                   "count (they move money already invested between funds); "
+                   "their fees are included in Fees.")

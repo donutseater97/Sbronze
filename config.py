@@ -12,6 +12,13 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from utils.transactions import (
+    FUND_COLUMNS,
+    TX_COLUMNS,
+    normalize_funds,
+    normalize_transactions,
+)
+
 # =============================================================================
 # COSTANTI — Percorsi file e impostazioni app
 # =============================================================================
@@ -53,9 +60,8 @@ def load_funds_and_transactions() -> tuple[pd.DataFrame, pd.DataFrame]:
     if os.path.exists(FUNDS_FILE):
         funds = pd.read_csv(FUNDS_FILE)
     else:
-        funds = pd.DataFrame(
-            columns=["Fund", "Ticker", "ISIN", "Fund Name", "Type", "Colour"]
-        )
+        funds = pd.DataFrame(columns=FUND_COLUMNS)
+    funds = normalize_funds(funds)
 
     # --- Transazioni ---
     if os.path.exists(TRANSACTIONS_FILE):
@@ -65,9 +71,9 @@ def load_funds_and_transactions() -> tuple[pd.DataFrame, pd.DataFrame]:
             date_format="%Y-%m-%d %H:%M:%S",
         )
     else:
-        transactions = pd.DataFrame(
-            columns=["Date", "Fund", "Price (€)", "Quantity", "Fees (€)"]
-        )
+        transactions = pd.DataFrame(columns=TX_COLUMNS)
+    # Operation / Linked Fund garantite (righe storiche senza colonna = "Buy")
+    transactions = normalize_transactions(transactions)
 
     return funds, transactions
 
@@ -113,7 +119,7 @@ def load_historical_prices(_funds_df: pd.DataFrame) -> pd.DataFrame:
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
-    # Rinomina colonne ticker → nome fondo (es. "0P0001CRXW.F" → "US")
+    # Rinomina colonne ticker → nome fondo (es. "0P0001CRXW.F" → "US (old)")
     for _, row in _funds_df.iterrows():
         ticker = row["Ticker"]
         fund_name = row["Fund"]

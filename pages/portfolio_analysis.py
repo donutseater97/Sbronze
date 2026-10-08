@@ -124,6 +124,16 @@ def portfolio_analysis(funds, transactions, hist_data, last_date_str):
             index=0, help="Weights used to build the portfolio return series and "
                           "its metrics. 'Market value' = quantity × latest NAV.")
     weights = _weights_for(weights_df, weight_scheme, fund_cols)
+    # Fondi che compongono davvero il portafoglio (peso > 0): esclude i fondi
+    # Subbed/Closed a quantità zero e quelli non ancora acquistati, che
+    # altrimenti falserebbero composizione, correlazione media e rischio
+    # (es. US (old) ~ US (a) hanno correlazione ≈ 1).
+    port_funds = [f for f in fund_cols if weights.get(f, 0.0) > 0] or fund_cols
+    _excluded = [f for f in fund_cols if f not in port_funds]
+    if _excluded:
+        st.caption("Not in the portfolio (zero weight), shown only in the per-fund "
+                   "metrics, rolling volatility and correlation matrix: "
+                   + ", ".join(_excluded) + ".")
 
     if returns_daily is not None:
         metrics = _compute_metrics(returns_daily, fund_cols, weights, rf)
@@ -138,7 +148,7 @@ def portfolio_analysis(funds, transactions, hist_data, last_date_str):
          "÷ (portfolio volatility). Well above 1 means diversification is "
          "reducing risk; near 1 means little benefit.")
     if returns_daily is not None:
-        _render_composition(returns_daily, fund_cols, weights)
+        _render_composition(returns_daily, port_funds, weights)
     st.divider()
 
     # 3. ROLLING
@@ -153,7 +163,7 @@ def portfolio_analysis(funds, transactions, hist_data, last_date_str):
     ) or int(m.get("rolling_window_days", 90))
     if returns_daily is not None:
         _render_rolling_vol(returns_daily, fund_cols, weights, window)
-        _render_rolling_corr(returns_daily, fund_cols, window)
+        _render_rolling_corr(returns_daily, port_funds, window)
     st.divider()
 
     # 4. CORRELATION MATRIX
@@ -176,7 +186,7 @@ def portfolio_analysis(funds, transactions, hist_data, last_date_str):
          "correlated with the rest.")
     cov_d = _load_csv("cov_daily.csv")
     if cov_d is not None:
-        _render_risk_contribution(cov_d, fund_cols, weights)
+        _render_risk_contribution(cov_d, port_funds, weights)
 
 
 def _render_downloads():

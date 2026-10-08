@@ -148,7 +148,7 @@ def _render_data_freshness(funds: pd.DataFrame, per_fund: dict,
             st.info(f"Holdings are up to {worst} days old. This is the most "
                     "recent composition Morningstar has for these funds, but "
                     "Morningstar can lag the fund houses: the official factsheets "
-                    "(document section of each fund page in Active Funds) may "
+                    "(document section of each fund page in Funds) may "
                     "already show a newer month-end.")
         if ms_behind:
             st.info("Morningstar lags the fund houses' own factsheets for: "

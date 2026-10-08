@@ -11,6 +11,7 @@ Mostra i grafici storici dei prezzi NAV per ciascun fondo con:
 
 import os
 import streamlit as st
+from utils.transactions import average_nav_by_fund, operation_label
 from utils.privacy import privacy_on, render_page_header
 import pandas as pd
 import plotly.graph_objects as go
@@ -211,25 +212,12 @@ def historical_prices(
     # L'average NAV è invece il prezzo medio di carico e NON dipende dalla
     # finestra visualizzata. Usiamo la stessa formula della pagina Overview:
     # (contributi lordi teorici - commissioni) / quantità, su tutto lo storico.
-    avg_nav_by_fund = {}
+    # Con gli switch: (contributi in entrata − fee) / quote entrate (Buy +
+    # Switch In), così un fondo uscito (quantità 0) mantiene il suo prezzo medio.
     tx_all = transactions.copy()
     tx_all["Date"] = pd.to_datetime(tx_all.get("Date"), errors="coerce")
     tx_all = tx_all.dropna(subset=["Date"])
-    if len(tx_all) > 0:
-        tx_all["Gross Contribution (real)"] = (
-            tx_all["Quantity"] * tx_all["Price (€)"] + tx_all["Fees (€)"]
-        )
-        tx_all["Gross Contribution (theor)"] = (
-            (tx_all["Gross Contribution (real)"] / 10).round() * 10
-        )
-        grouped = tx_all.groupby("Fund").agg(
-            gross=("Gross Contribution (theor)", "sum"),
-            fees=("Fees (€)", "sum"),
-            qty=("Quantity", "sum"),
-        )
-        for fund, row in grouped.iterrows():
-            if row["qty"] and row["qty"] != 0:
-                avg_nav_by_fund[fund] = (row["gross"] - row["fees"]) / row["qty"]
+    avg_nav_by_fund = average_nav_by_fund(tx_all)
 
     # ===== RENDERING GRAFICO =====
     if st.session_state.hist_view_mode == "combined":
@@ -404,7 +392,7 @@ def _render_combined_view(plot_df, selected_funds, avg_nav_by_fund, transactions
                 trans_prices.append(fund_df.loc[closest_idx, fund])
                 trans_dates.append(t_date)
                 hover_texts.append(
-                    f"<b>Transaction</b><br>"
+                    f"<b>{operation_label(t_row.get('Operation', 'Buy'), t_row.get('Linked Fund', ''))}</b><br>"
                     f"Date: {t_date.strftime('%Y-%m-%d')}<br>"
                     f"Qty: {t_row['Quantity']:.3f}<br>"
                     f"Price: €{t_row['Price (€)']:.2f}<br>"
@@ -816,7 +804,7 @@ def _render_single_fund_chart(plot_df, fund, avg_nav_by_fund, trans_df):
             trans_prices.append(fund_df.loc[closest_idx, fund])
             trans_dates.append(t_date)
             hover_texts.append(
-                f"<b>Transaction</b><br>"
+                f"<b>{operation_label(t_row.get('Operation', 'Buy'), t_row.get('Linked Fund', ''))}</b><br>"
                 f"Date: {t_date.strftime('%Y-%m-%d')}<br>"
                 f"Quantity: {t_row['Quantity']:.3f}<br>"
                 f"Price: €{t_row['Price (€)']:.2f}<br>"

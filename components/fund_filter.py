@@ -19,6 +19,7 @@ _COLOR_DOT = {
     "#999999": "⚪",                    # grigio
     "#00CCFF": "🔵", "#00ccff": "🔵",  # cyan → blu
     "#CC00FF": "🟣", "#cc00ff": "🟣",  # viola
+    "#C84007": "🟠", "#c84007": "🟠",  # arancio (US (a))
 }
 
 
@@ -45,8 +46,13 @@ def render_fund_filter(
     if not fund_list:
         return []
 
-    # Selezione corrente (default = tutti i fondi)
-    current = [f for f in st.session_state.get("fund_filter", fund_list) if f in fund_list]
+    # Selezione di default: fondi Active + detenuti (calcolata in main.py);
+    # i fondi Subbed/Closed a quantità zero partono spenti.
+    default_sel = [f for f in st.session_state.get("fund_filter_default", fund_list)
+                   if f in fund_list] or list(fund_list)
+
+    # Selezione corrente
+    current = [f for f in st.session_state.get("fund_filter", default_sel) if f in fund_list]
 
     # Usa un contatore di reset per forzare un nuovo widget key ad ogni reset
     reset_counter = st.session_state.get(f"_pill_reset_n{key_suffix}", 0)
@@ -73,9 +79,9 @@ def render_fund_filter(
 
     selected = list(selected) if selected else []
 
-    # Gestione ✕: resetta a tutti i fondi
+    # Gestione ✕: torna alla selezione di default
     if "✕" in selected:
-        st.session_state.fund_filter = list(fund_list)
+        st.session_state.fund_filter = list(default_sel)
         st.session_state[f"_pill_reset_n{key_suffix}"] = reset_counter + 1
         st.rerun()
 

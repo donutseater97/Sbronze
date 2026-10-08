@@ -20,6 +20,7 @@ import streamlit as st
 import pandas as pd
 
 # Configurazione globale e caricamento dati
+from utils.transactions import default_fund_selection
 from config import (
     APP_TITLE,
     FUND_COLORS,
@@ -77,9 +78,14 @@ for _, row in funds.iterrows():
 # Costruisci lista ticker Yahoo Finance (ticker + ".F" per borsa di Francoforte)
 yahoo_tickers = [f"{t}.F" for t in funds["Ticker"].dropna().unique()]
 
+# Selezione di default dei filtri: fondi Active + fondi ancora detenuti.
+# I fondi Subbed/Closed a quantità zero restano selezionabili ma spenti.
+st.session_state.fund_filter_default = (
+    default_fund_selection(funds, transactions) if len(funds) > 0 else []
+)
 # Inizializza il filtro fondi nello stato sessione
 if "fund_filter" not in st.session_state:
-    st.session_state.fund_filter = funds["Fund"].tolist() if len(funds) > 0 else []
+    st.session_state.fund_filter = list(st.session_state.fund_filter_default)
 
 # Carica prezzi storici dal CSV generato da GitHub Actions
 hist_data_global = load_historical_prices(funds)
@@ -144,11 +150,11 @@ pg = st.navigation({
         ),
         st.Page(
             lambda: active_funds(funds),
-            title="📋 Active Funds",
+            title="📋 Funds",
             url_path="funds",
         ),
         st.Page(
-            lambda: add_transactions_and_funds(funds, transactions),
+            lambda: add_transactions_and_funds(funds, transactions, hist_data_global),
             title="➕ Add Transactions & Funds",
             url_path="admin",
         ),

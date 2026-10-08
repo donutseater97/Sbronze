@@ -3,6 +3,8 @@ pages/add_transactions_and_funds.py — Pagina admin "Add Transactions & Funds".
 
 Pagina protetta da password che consente di:
 - Aggiungere nuove transazioni (acquisti)
+- Registrare uno switch tra due fondi (es. US (old) → US (a)): due righe
+  "Switch Out" / "Switch In" scritte in un unico commit
 - Aggiungere nuovi fondi al portafoglio
 - Committare automaticamente le modifiche su GitHub via API
 """
@@ -24,9 +26,18 @@ from config import (
     load_historical_prices,
 )
 from utils.github_store import append_csv_rows, GitHubWriteError, GitHubConfigError
-
-TX_COLUMNS = ["Date", "Fund", "Price (€)", "Quantity", "Fees (€)"]
-FUND_COLUMNS = ["Fund", "Ticker", "ISIN", "Fund Name", "Type", "Colour", "URL"]
+from utils.transactions import (
+    FUND_COLUMNS,
+    OP_BUY,
+    OP_SWITCH_IN,
+    OP_SWITCH_OUT,
+    QTY_EPS,
+    STATUS_ACTIVE,
+    STATUSES,
+    TX_COLUMNS,
+    current_quantities,
+    fund_status_map,
+)
 _FLASH_KEY = "_admin_flash"
 _PENDING_KEY = "_admin_pending_writes"
 
@@ -34,6 +45,7 @@ _PENDING_KEY = "_admin_pending_writes"
 def add_transactions_and_funds(
     funds: pd.DataFrame,
     transactions: pd.DataFrame,
+    hist_data: pd.DataFrame | None = None,
 ):
     """Renderizza la pagina Add Transactions & Funds.
 
@@ -98,6 +110,8 @@ def add_transactions_and_funds(
                         "Price (€)": price,
                         "Quantity": quantity,
                         "Fees (€)": fees,
+                        "Operation": OP_BUY,
+                        "Linked Fund": "",
                     }])
                     _commit_rows(
                         TRANSACTIONS_REPO_PATH, TRANSACTIONS_FILE, new_row, TX_COLUMNS,
@@ -105,6 +119,13 @@ def add_transactions_and_funds(
                         f"{contrib_date.strftime('%Y-%m-%d')} via Streamlit",
                         label=f"{fund_choice} {contrib_date:%Y-%m-%d} · {quantity:g} @ €{price:.2f}",
                     )
+
+    st.divider()
+
+    # ===== SWITCH TRA FONDI =====
+    st.header("⇄ Switch Between Funds")
+    if IS_OWNER and len(funds) >= 2:
+        _render_switch_section(funds, transactions, hist_data)
 
     st.divider()
 
@@ -119,6 +140,7 @@ def add_transactions_and_funds(
                 isin = st.text_input("ISIN", placeholder="e.g., LU0281484963")
                 name = st.text_input("Fund Name", placeholder="e.g., JPMorgan Funds - US Select Equity Plus Fund D (acc) - EUR")
                 fund_type = st.selectbox("Type", ["Equity", "Bond"])
+                status = st.selectbox("Status", STATUSES, index=STATUSES.index(STATUS_ACTIVE))
             with col2:
                 ticker = st.text_input("Ticker", placeholder="e.g., 0P0001CRXW")
                 colour = st.color_picker("Colour", value="#C00000")
@@ -137,7 +159,7 @@ def add_transactions_and_funds(
                     st.error(f"Ticker '{ticker}' already exists")
                 else:
                     new_fund = pd.DataFrame([{
-                        "Fund": fund_cat, "Ticker": ticker, "ISIN": isin,
+                        "Fund": fund_cat, "Status": status, "Ticker": ticker, "ISIN": isin,
                         "Fund Name": name, "Type": fund_type, "Colour": colour,
                         "URL": fund_url or "",
                     }])
@@ -149,6 +171,118 @@ def add_transactions_and_funds(
                     )
 
     return funds, transactions
+
+
+def _nav_on(hist_data, fund, day):
+    """NAV del fondo alla data (ultimo valore <= data) da historical_data, o None."""
+    if hist_data is None or len(hist_data) == 0 or fund not in hist_data.columns:
+        return None
+    h = hist_data[["date", fund]].dropna()
+    h = h[pd.to_datetime(h["date"]) <= pd.Timestamp(day)]
+    if h.empty:
+        return None
+    return float(h.sort_values("date").iloc[-1][fund])
+
+
+def _render_switch_section(funds, transactions, hist_data):
+    """Form per registrare uno switch: azzera (o riduce) il fondo di uscita e
+    carica le nuove quote sul fondo di destinazione, in un unico commit.
+
+    Righe scritte in transaction_history.csv:
+        Switch Out  Fund=<da>  Quantity=-q_out  Fees=0     Linked Fund=<a>
+        Switch In   Fund=<a>   Quantity=+q_in   Fees=fee   Linked Fund=<da>
+    La fee dello switch va sulla gamba in entrata: controvalore in entrata
+    (q_in × NAV + fee) ≈ controvalore in uscita (q_out × NAV).
+    """
+    st.caption(
+        "Moves a position from one fund to another (e.g. **US (old) → US (a)**). "
+        "Records two linked rows: a *Switch Out* that removes the units from the "
+        "source fund and a *Switch In* with the units received in the target "
+        "fund at its own NAV. Switches are not counted as new contributions."
+    )
+    fund_names = funds["Fund"].tolist()
+    status = fund_status_map(funds)
+    qty = current_quantities(transactions) if len(transactions) else pd.Series(dtype=float)
+    held = [f for f in fund_names if float(qty.get(f, 0.0)) > QTY_EPS]
+    if not held:
+        st.info("No fund currently held: nothing to switch.")
+        return
+
+    # Default: fondo detenuto ma non Active (es. Subbed) → primo Active non detenuto
+    src_default = next((f for f in held if status.get(f) != STATUS_ACTIVE), held[0])
+    c1, c2 = st.columns(2)
+    with c1:
+        src = st.selectbox("From fund (Switch Out)", held, index=held.index(src_default),
+                           key="sw_src")
+    targets = [f for f in fund_names if f != src]
+    tgt_default = next((f for f in targets if status.get(f) == STATUS_ACTIVE
+                        and float(qty.get(f, 0.0)) <= QTY_EPS), targets[0])
+    with c2:
+        tgt = st.selectbox("To fund (Switch In)", targets, index=targets.index(tgt_default),
+                           key="sw_tgt")
+
+    held_qty = round(float(qty.get(src, 0.0)), 6)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**Out — {src}**")
+        out_date = st.date_input("Out date", date.today(), key="sw_out_date")
+        nav_hint = _nav_on(hist_data, src, out_date)
+        out_price = st.number_input("Out NAV (€)", min_value=0.0, format="%.4f", key="sw_out_price",
+                                    help=f"NAV in historical data on that date: €{nav_hint:.2f}"
+                                    if nav_hint else None)
+        full = st.checkbox(f"Transfer the entire position ({held_qty:g} units)", value=True,
+                           key="sw_full")
+        if full:
+            out_qty = held_qty
+        else:
+            out_qty = st.number_input("Units out", min_value=0.0, max_value=held_qty,
+                                      step=0.001, format="%f", key="sw_out_qty")
+    with c2:
+        st.markdown(f"**In — {tgt}**")
+        in_date = st.date_input("In date", date.today(), key="sw_in_date")
+        nav_hint_in = _nav_on(hist_data, tgt, in_date)
+        in_price = st.number_input("In NAV (€)", min_value=0.0, format="%.4f", key="sw_in_price",
+                                   help=f"NAV in historical data on that date: €{nav_hint_in:.2f}"
+                                   if nav_hint_in else None)
+        in_qty = st.number_input("Units in (as on the bank statement)", min_value=0.0,
+                                 step=0.001, format="%f", key="sw_in_qty")
+        in_fees = st.number_input("Switch fees (€)", min_value=0.0, key="sw_fees")
+
+    out_value = out_qty * out_price
+    in_value = in_qty * in_price + in_fees
+    if out_price > 0 and in_price > 0:
+        implied = (out_value - in_fees) / in_price
+        st.caption(f"Value out: €{out_value:,.2f} · value in (units × NAV + fees): "
+                   f"€{in_value:,.2f} · units implied at this NAV: {implied:,.3f}")
+        if in_qty > 0 and out_value > 0 and abs(in_value - out_value) / out_value > 0.01:
+            st.warning("Value in and value out differ by more than 1%: check NAVs, "
+                       "units and fees before saving.")
+    if status.get(src) == STATUS_ACTIVE:
+        st.info(f"After the switch, consider setting **{src}** to *Subbed* in "
+                "`data/funds.csv` so it is off by default in the filters.")
+
+    if st.button("Record switch", type="primary", key="sw_submit"):
+        if out_price <= 0 or in_price <= 0 or out_qty <= 0 or in_qty <= 0:
+            st.error("NAVs and units (out and in) must be greater than 0")
+        elif out_qty > held_qty + QTY_EPS:
+            st.error(f"Units out exceed the {held_qty:g} units held in {src}")
+        elif in_date < out_date:
+            st.error("The In date cannot be earlier than the Out date")
+        else:
+            rows = pd.DataFrame([
+                {"Date": pd.Timestamp(out_date).strftime("%Y-%m-%d %H:%M:%S"),
+                 "Fund": src, "Price (€)": out_price, "Quantity": -out_qty,
+                 "Fees (€)": 0.0, "Operation": OP_SWITCH_OUT, "Linked Fund": tgt},
+                {"Date": pd.Timestamp(in_date).strftime("%Y-%m-%d %H:%M:%S"),
+                 "Fund": tgt, "Price (€)": in_price, "Quantity": in_qty,
+                 "Fees (€)": in_fees, "Operation": OP_SWITCH_IN, "Linked Fund": src},
+            ])
+            _commit_rows(
+                TRANSACTIONS_REPO_PATH, TRANSACTIONS_FILE, rows, TX_COLUMNS,
+                f"Switch {src} -> {tgt} on {out_date:%Y-%m-%d} via Streamlit",
+                label=f"switch {src} → {tgt} · {out_qty:g} out @ €{out_price:.2f}, "
+                      f"{in_qty:g} in @ €{in_price:.2f}",
+            )
 
 
 def _commit_rows(repo_path, local_path, rows, columns, message, label,

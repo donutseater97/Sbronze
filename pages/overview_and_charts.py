@@ -7,6 +7,14 @@ Mostra il riepilogo del portafoglio con:
 - Grafico Revenue P&L (market value nel tempo)
 - Grafico Investment Evolution (contributi a scalino + market value)
 - Pie chart allocazione (Gross Contributions + Market Value)
+
+Switch tra fondi (es. US (old) → US (a)), vedi utils/transactions.py:
+- Per fondo: Return = Market Value + controvalore uscito − contributi, quindi
+  un fondo Subbed a quantità 0 mostra il suo rendimento realizzato; il fondo
+  di destinazione parte con contributo = controvalore trasferito.
+- Totali, sparkline e grafici usano la "lineage": i fondi confluiti via switch
+  in quelli selezionati sono inclusi, e gli switch interni non contano come
+  nuovi versamenti.
 """
 
 import streamlit as st
@@ -23,6 +31,14 @@ from components.chart_helpers import (
 )
 from utils.formatting import count_decimals, format_qty, f_eur, f_pct, f_num, f_qty, sign_bg, style_cols
 from utils.privacy import privacy_on, fmt_eur, mask_text, render_page_header, MASK, MASK_PLAIN, normalize_spark
+from utils.transactions import (
+    QTY_EPS,
+    add_flow_columns,
+    average_nav_by_fund,
+    book_flows,
+    expand_lineage,
+    external_flows,
+)
 
 
 def overview_and_charts(
@@ -57,31 +73,43 @@ def overview_and_charts(
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["Date"])
 
+    df_all = df.copy()
+
     # Applica filtro fondi
     if filter_funds:
         df = df[df["Fund"].isin(filter_funds)]
 
+    # Selezione per i TOTALI: filtro + fondi confluiti via switch (lineage).
+    # Così, ad es., il rendimento realizzato di US (old) resta nei totali
+    # anche quando il suo filtro è spento ma US (a) è selezionato.
+    sel_funds = filter_funds if filter_funds else funds["Fund"].tolist()
+    total_funds = expand_lineage(sel_funds, df_all)
+    ext = external_flows(df_all, total_funds)
+
     # ----- Calcola metriche per fondo -----
-    df["Gross Contribution (real)"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
-    df["Gross Contribution (theor)"] = (df["Gross Contribution (real)"] / 10).round() * 10
-    df["Net Invested"] = df["Quantity"] * df["Price (€)"]
+    # _gc  = contributi lordi nel fondo (Buy arrotondati ai 10 € + Switch In)
+    # _net = contributi netti (Q×P)       _wd = controvalore uscito (Switch Out)
+    df = add_flow_columns(df)
+    df["Gross Contribution (theor)"] = df["_gc"]
 
     summary = df.groupby("Fund").agg({
         "Quantity": "sum",
         "Fees (€)": "sum",
-        "Gross Contribution (theor)": "sum",
-        "Net Invested": "sum",
+        "_gc": "sum",
+        "_net": "sum",
+        "_wd": "sum",
+        "_wd_net": "sum",
     }).reset_index()
+    # Residui floating di una posizione azzerata => 0
+    summary["Quantity"] = summary["Quantity"].where(summary["Quantity"].abs() > QTY_EPS, 0.0)
 
     summary = summary.rename(columns={
-        "Gross Contribution (theor)": "Gross Contributions (€)",
-        "Net Invested": "Net Invested (€)",
+        "_gc": "Gross Contributions (€)",
+        "_net": "Net Invested (€)",
     })
 
-    # Average NAV = (contributi - commissioni) / quantità
-    summary["Average NAV (€)"] = (
-        (summary["Gross Contributions (€)"] - summary["Fees (€)"]) / summary["Quantity"]
-    )
+    # Average NAV = (contributi in entrata - commissioni) / quote entrate
+    summary["Average NAV (€)"] = summary["Fund"].map(average_nav_by_fund(transactions))
 
     # ----- Precisione decimale per quantità (per fondo) -----
     try:
@@ -142,7 +170,9 @@ def overview_and_charts(
     summary["Quantity"] = summary.apply(format_qty_overview, axis=1)
 
     # ----- Calcola Return, Net Return, MoM, Weight -----
-    summary["Total Return (€)"] = summary["Market Value (€)"] - summary["Gross Contributions (€)"]
+    summary["Total Return (€)"] = (
+        summary["Market Value (€)"] + summary["_wd"] - summary["Gross Contributions (€)"]
+    )
     summary["Total Return (%)"] = (
         summary["Total Return (€)"] / summary["Gross Contributions (€)"] * 100
     ).round(2)
@@ -153,7 +183,9 @@ def overview_and_charts(
         + "%)"
     )
 
-    summary["Net Return (€)"] = summary["Market Value (€)"] - summary["Net Invested (€)"]
+    summary["Net Return (€)"] = (
+        summary["Market Value (€)"] + summary["_wd_net"] - summary["Net Invested (€)"]
+    )
     summary["Net Return (%)"] = (
         summary["Net Return (€)"] / summary["Net Invested (€)"] * 100
     ).round(2)
@@ -295,11 +327,31 @@ def overview_and_charts(
     # ===== TOTALS ROW =====
     st.markdown("")
     st.markdown("**Totals based on filters:**")
-    total_gross = summary["Gross Contributions (€)"].sum()
-    total_fees = summary["Fees (€)"].sum()
-    total_net = summary["Net Invested (€)"].sum()
-    total_return = summary["Total Return (€)"].sum()
-    total_net_return = summary["Net Return (€)"].sum()
+    _lineage_extra = [f for f in total_funds if f not in sel_funds]
+    if _lineage_extra:
+        st.caption("Totals also include the realized results of "
+                   + ", ".join(f"**{f}**" for f in _lineage_extra)
+                   + " (switched into the selected funds); internal switches are "
+                     "not counted as new contributions.")
+
+    # Ultimo NAV di tutti i fondi (anche quelli inclusi solo via lineage)
+    _latest_all = {}
+    if len(hist_data) > 0 and "date" in hist_data.columns:
+        _ld = pd.to_datetime(hist_data["date"]).max()
+        _lr = hist_data[hist_data["date"] == _ld]
+        for _f in total_funds:
+            if _f in _lr.columns and pd.notna(_lr[_f].values[0]):
+                _latest_all[_f] = float(_lr[_f].values[0])
+    _qty_all = ext.groupby("Fund")["Quantity"].sum()
+    total_mv_lineage = float(sum(
+        float(_qty_all.get(f, 0.0)) * p for f, p in _latest_all.items()
+        if abs(float(_qty_all.get(f, 0.0))) > QTY_EPS))
+
+    total_gross = float(ext["cap_gross"].sum())
+    total_fees = float(ext["Fees (€)"].sum())
+    total_net = float(ext["cap_net"].sum())
+    total_return = total_mv_lineage + float(ext["wd_gross"].sum()) - total_gross
+    total_net_return = total_mv_lineage + float(ext["wd_net"].sum()) - total_net
     total_return_pct = (total_return / total_gross * 100) if total_gross > 0 else 0
     total_net_return_pct = (total_net_return / total_net * 100) if total_net > 0 else 0
     total_fees_pct = (total_fees / total_gross * 100) if total_gross > 0 else 0
@@ -315,46 +367,37 @@ def overview_and_charts(
         hist_asc = hist_data.sort_values("date", ascending=True)
         spark_hist = hist_asc.tail(SPARK_DAYS + 1).reset_index(drop=True)
 
-        tx_sorted_sp = transactions.copy()
-        tx_sorted_sp["Date"] = pd.to_datetime(tx_sorted_sp["Date"], errors="coerce")
-        tx_sorted_sp = tx_sorted_sp.dropna(subset=["Date"]).sort_values("Date")
-        # BUGFIX: la sparkline Total Return usava "Gross Contribution (theor)"
-        # che però NON esiste in `transactions` (è calcolata su `df`). Mancando,
-        # day_gross restava 0 e la sparkline Total Return mostrava il MARKET
-        # VALUE invece del rendimento. La ricreiamo qui.
-        tx_sorted_sp["Gross Contribution (real)"] = (
-            tx_sorted_sp["Quantity"] * tx_sorted_sp["Price (€)"] + tx_sorted_sp["Fees (€)"]
-        )
-        tx_sorted_sp["Gross Contribution (theor)"] = (
-            (tx_sorted_sp["Gross Contribution (real)"] / 10).round() * 10
-        )
+        # Flussi esterni della selezione (lineage): capitale entrato e
+        # controvalore uscito, così uno switch interno non sposta le curve.
+        tx_sorted_sp = ext.sort_values("Date")
 
         for i in range(len(spark_hist)):
             row_sp = spark_hist.iloc[i]
             day_mv = 0.0
-            day_gross = 0.0
-            day_net_inv = 0.0
-            for fund in filter_funds:
+            _upto = tx_sorted_sp[tx_sorted_sp["Date"] <= row_sp["date"]]
+            day_gross = float(_upto["cap_gross"].sum())
+            day_net_inv = float(_upto["cap_net"].sum())
+            day_wd = float(_upto["wd_gross"].sum())
+            day_wd_net = float(_upto["wd_net"].sum())
+            for fund in total_funds:
                 if fund not in spark_hist.columns:
                     continue
                 p = pd.to_numeric(pd.Series([row_sp[fund]]), errors="coerce").iloc[0]
                 if pd.isna(p):
                     continue
-                fund_txs = tx_sorted_sp[(tx_sorted_sp["Fund"] == fund) & (tx_sorted_sp["Date"] <= row_sp["date"])]
+                fund_txs = _upto[_upto["Fund"] == fund]
                 qty = fund_txs["Quantity"].sum() if len(fund_txs) > 0 else 0
                 day_mv += qty * p
-                day_gross += fund_txs["Gross Contribution (theor)"].sum() if "Gross Contribution (theor)" in fund_txs.columns else 0
-                day_net_inv += (fund_txs["Quantity"] * fund_txs["Price (€)"]).sum() if len(fund_txs) > 0 else 0
 
             spark_mv.append(day_mv)
-            spark_return.append(day_mv - day_gross)
-            spark_net_return.append(day_mv - day_net_inv)
+            spark_return.append(day_mv + day_wd - day_gross)
+            spark_net_return.append(day_mv + day_wd_net - day_net_inv)
 
             # Daily P&L
             if i > 0:
                 prev_row_sp = spark_hist.iloc[i - 1]
                 day_pnl = 0.0
-                for fund in filter_funds:
+                for fund in total_funds:
                     if fund not in spark_hist.columns:
                         continue
                     p_today = pd.to_numeric(pd.Series([row_sp[fund]]), errors="coerce").iloc[0]
@@ -377,10 +420,10 @@ def overview_and_charts(
     if len(hist_data) > 0 and "date" in hist_data.columns:
         hist_asc_gc = hist_data.sort_values("date", ascending=True)
         spark_dates = hist_asc_gc.tail(SPARK_DAYS).reset_index(drop=True)["date"]
-        tx_gc = df.sort_values("Date", ascending=True)
+        tx_gc = ext.sort_values("Date", ascending=True)
         for d in spark_dates:
             txs_up_to = tx_gc[tx_gc["Date"] <= d]
-            spark_gross.append(txs_up_to["Gross Contribution (theor)"].sum() if len(txs_up_to) > 0 else 0.0)
+            spark_gross.append(txs_up_to["cap_gross"].sum() if len(txs_up_to) > 0 else 0.0)
             spark_fees.append(txs_up_to["Fees (€)"].sum() if len(txs_up_to) > 0 else 0.0)
 
     # Sparkline YoY: performance % del portafoglio a 12 mesi, calcolata per
@@ -396,15 +439,15 @@ def overview_and_charts(
         # quote correnti per fondo (totali) — la performance NAV non dipende dalle
         # date di acquisto, quindi usiamo le quote possedute oggi come pesi.
         qty_now = {f: tx_sorted_sp[tx_sorted_sp["Fund"] == f]["Quantity"].sum()
-                   for f in filter_funds}
+                   for f in total_funds}
         for d in spark_dates_yoy:
             d_past = d - pd.DateOffset(months=12)
             mv_now = mv_past = 0.0
-            for f in filter_funds:
+            for f in total_funds:
                 if f not in price_idx.columns:
                     continue
                 q = qty_now.get(f, 0.0)
-                if q <= 0:
+                if q <= QTY_EPS:
                     continue
                 s = pd.to_numeric(price_idx[f], errors="coerce").dropna()
                 if s.empty:
@@ -435,10 +478,8 @@ def overview_and_charts(
     daily_pnl_prev_mv = 0.0
     if len(hist_data) > 0 and "date" in hist_data.columns:
         hist_desc = hist_data.sort_values("date", ascending=False)
-        tx_sorted_pnl = transactions.copy()
-        tx_sorted_pnl["Date"] = pd.to_datetime(tx_sorted_pnl["Date"], errors="coerce")
-        tx_sorted_pnl = tx_sorted_pnl.dropna(subset=["Date"]).sort_values("Date")
-        for fund in filter_funds:
+        tx_sorted_pnl = ext.sort_values("Date")
+        for fund in total_funds:
             if fund not in hist_desc.columns:
                 continue
             s = pd.to_numeric(hist_desc[fund], errors="coerce")
@@ -485,7 +526,7 @@ def overview_and_charts(
         st.metric("Total Gross Contributions", fmt_eur(total_gross), border=True,
                   chart_data=spark_gross if spark_gross else _empty_spark, chart_type="line")
     with row2c2:
-        st.metric("Total Market Value", fmt_eur(total_market_value), border=True,
+        st.metric("Total Market Value", fmt_eur(total_mv_lineage), border=True,
                   chart_data=spark_mv if spark_mv else _empty_spark, chart_type="line")
     with row2c3:
         st.metric("YoY performance", f"{portfolio_yoy:+.2f}%",
@@ -497,8 +538,8 @@ def overview_and_charts(
     st.header("📊 Charts")
 
     # ===== INVESTMENT EVOLUTION + ALLOCATION PIES =====
-    if len(df) > 0:
-        _render_evolution_and_allocation(df, funds, hist_data)
+    if len(ext) > 0:
+        _render_evolution_and_allocation(ext.copy(), funds, hist_data)
 
 
 # =============================================================================
@@ -553,9 +594,11 @@ def _render_evolution_and_allocation(df, funds, hist_data):
         return
 
     # Contributi cumulati (step)
+    # df = flussi esterni della selezione (external_flows): cap_gross è il
+    # capitale entrato (Buy + Switch In da fondi non selezionati). Gli switch
+    # interni alla selezione non creano gradini.
     df_sorted = df.sort_values("date_dt")
-    df_sorted["Gross Contribution (real)"] = df_sorted["Quantity"] * df_sorted["Price (€)"] + df_sorted["Fees (€)"]
-    df_sorted["Gross Contribution (theor)"] = (df_sorted["Gross Contribution (real)"] / 10).round() * 10
+    df_sorted["Gross Contribution (theor)"] = df_sorted["cap_gross"]
     daily_data = df_sorted.groupby("date_dt").agg({"Gross Contribution (theor)": "sum"}).reset_index()
     daily_data["Gross Contribution"] = daily_data["Gross Contribution (theor)"].cumsum()
     daily_data = daily_data.sort_values("date_dt")
@@ -603,7 +646,13 @@ def _render_allocation_pies(df, funds, hist_data):
     if alloc_by is None:
         alloc_by = "Fund"
 
-    df["invested"] = df["Quantity"] * df["Price (€)"] + df["Fees (€)"]
+    # Contributi "in essere": saldo contributi per fondo (uno Switch Out
+    # azzera la quota del fondo uscito, lo Switch In la carica sul nuovo).
+    _book = book_flows(df[["Date", "Fund", "Price (€)", "Quantity", "Fees (€)",
+                           "Operation", "Linked Fund"]])
+    _bal = _book.groupby("Fund")["_book_gross"].sum()
+    _bal = _bal[_bal > 0.005]
+    df = _bal.rename("invested").reset_index()
 
     # Palette colori per tipo e asset manager
     type_colors = {
@@ -642,7 +691,8 @@ def _render_allocation_pies(df, funds, hist_data):
     mv_map = {}
     if len(hist_data) > 0 and "date" in hist_data.columns:
         latest_d = pd.to_datetime(hist_data["date"], errors="coerce").max()
-        qty_by_fund = df.groupby("Fund")["Quantity"].sum()
+        qty_by_fund = _book.groupby("Fund")["Quantity"].sum()
+        qty_by_fund = qty_by_fund[qty_by_fund > QTY_EPS]
         for fund in qty_by_fund.index:
             if fund in hist_data.columns:
                 vals = hist_data[hist_data["date"] == latest_d][fund].values

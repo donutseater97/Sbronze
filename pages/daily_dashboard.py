@@ -39,7 +39,8 @@ def daily_dashboard(
 
     # Usa filtro fondi dallo stato sessione
     if "fund_filter" not in st.session_state or len(st.session_state.fund_filter) == 0:
-        filter_funds = funds["Fund"].tolist() if len(funds) > 0 else []
+        filter_funds = st.session_state.get(
+            "fund_filter_default", funds["Fund"].tolist() if len(funds) > 0 else [])
     else:
         filter_funds = st.session_state.fund_filter
 

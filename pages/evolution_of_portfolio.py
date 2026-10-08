@@ -16,6 +16,7 @@ import plotly.graph_objects as go
 from config import FUND_COLORS
 from components.fund_filter import render_fund_filter
 from utils.formatting import f_eur, f_date, style_cols
+from utils.transactions import book_flows
 from components.styling import (
     hex_to_rgb,
     daily_change_style,
@@ -643,11 +644,14 @@ def _render_portfolio_composition(hist_asc, filter_funds, qty_prev_df, transacti
             qty = qty_current_df[fund].reset_index(drop=True)
             comp_df[fund] = (qty * price).fillna(0.0)
     else:
-        # Gross Contribution cumulata per fund
+        # Gross Contribution cumulata per fund, come "saldo contributi":
+        # uno Switch Out azzera (in proporzione) i contributi del fondo uscito,
+        # lo Switch In carica il controvalore sul fondo di destinazione.
         tx_sorted = transactions.copy()
         tx_sorted["Date"] = pd.to_datetime(tx_sorted["Date"], errors="coerce")
         tx_sorted = tx_sorted.dropna(subset=["Date"]).sort_values("Date")
-        tx_sorted["Gross Contribution"] = tx_sorted["Quantity"] * tx_sorted["Price (€)"] + tx_sorted["Fees (€)"]
+        tx_sorted = book_flows(tx_sorted)
+        tx_sorted["Gross Contribution"] = tx_sorted["_book_gross"]
 
         for fund in filter_funds:
             fund_tx = tx_sorted[tx_sorted["Fund"] == fund][["Date", "Gross Contribution"]].copy()

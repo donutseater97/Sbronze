@@ -42,6 +42,10 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 if os.path.basename(_ROOT) == "scripts":
     _ROOT = os.path.dirname(_ROOT)
 
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from utils.transactions import book_flows, normalize_transactions, QTY_EPS  # noqa: E402
+
 DATA_DIR = os.path.join(_ROOT, "data")
 OUT_DIR = os.path.join(DATA_DIR, "analytics")
 
@@ -102,8 +106,8 @@ def _current_weights(funds):
     """Pesi da controvalore attuale (quote × ultimo NAV), coerenti con Overview.
     Fallback a equal-weight se mancano transazioni/prezzi."""
     try:
-        tx = pd.read_csv(os.path.join(DATA_DIR, "transaction_history.csv"),
-                         parse_dates=["Date"])
+        tx = normalize_transactions(pd.read_csv(
+            os.path.join(DATA_DIR, "transaction_history.csv"), parse_dates=["Date"]))
         prices = pd.read_csv(os.path.join(DATA_DIR, "historical_data.csv"),
                              parse_dates=["Date"]).sort_values("Date")
         latest = prices.iloc[-1]
@@ -112,7 +116,7 @@ def _current_weights(funds):
         for f in funds:
             q = float(qty.get(f, 0.0))
             nav = latest.get(f)
-            if q > 0 and pd.notna(nav):
+            if q > QTY_EPS and pd.notna(nav):
                 w[f] = q * float(nav)
         tot = sum(w.values())
         if tot > 0:
@@ -123,7 +127,7 @@ def _current_weights(funds):
 
 
 def _rolling_analytics(returns_daily: pd.DataFrame, funds, weights,
-                       window=ROLLING_WINDOW_DAYS):
+                       window=ROLLING_WINDOW_DAYS, port_funds=None):
     """Volatilità rolling annualizzata per fondo e portafoglio, e correlazione
     rolling (media di coppia + per coppia)."""
     ann = np.sqrt(TRADING_DAYS)
@@ -144,7 +148,12 @@ def _rolling_analytics(returns_daily: pd.DataFrame, funds, weights,
     for a, b in pairs:
         corr_pairs[f"{a}~{b}"] = returns_daily[a].rolling(window).corr(returns_daily[b])
     corr_pairs = corr_pairs.dropna(how="all")
-    corr_avg = corr_pairs.mean(axis=1).to_frame("AvgPairwiseCorr")
+    # Media solo sulle coppie di fondi in portafoglio (esclude ad es. la coppia
+    # US (old) ~ US (a), ρ ≈ 1, quando uno dei due non è detenuto)
+    pf = set(port_funds or funds)
+    in_port = [c for c in corr_pairs.columns
+               if c.split("~")[0] in pf and c.split("~")[1] in pf]
+    corr_avg = corr_pairs[in_port or list(corr_pairs.columns)].mean(axis=1).to_frame("AvgPairwiseCorr")
 
     return vol_fund, vol_port, corr_avg, corr_pairs
 
@@ -262,15 +271,22 @@ def main():
     weights = _current_weights(funds)
     # Salva i tre schemi di pesi, così la pagina può farli scegliere all'utente
     # senza ricalcolarli: market value (default), capitale investito, equal.
+    # Fondi in portafoglio = peso a market value > 0 (esclude i fondi Subbed /
+    # Closed a quantità zero e quelli non ancora acquistati)
+    port_funds = [f for f in funds if weights.get(f, 0.0) > 0] or list(funds)
     try:
-        tx = pd.read_csv(os.path.join(DATA_DIR, "transaction_history.csv"))
-        invested = tx.assign(inv=tx["Quantity"] * tx["Price (€)"]).groupby("Fund")["inv"].sum()
-        w_inv = {f: float(invested.get(f, 0.0)) for f in funds}
+        # Capitale investito "in essere": saldo contributi netti (Q×P) per fondo;
+        # uno switch sposta il saldo dal fondo uscito a quello di destinazione.
+        tx = normalize_transactions(pd.read_csv(
+            os.path.join(DATA_DIR, "transaction_history.csv"), parse_dates=["Date"]))
+        invested = book_flows(tx).groupby("Fund")["_book_net"].sum()
+        w_inv = {f: max(float(invested.get(f, 0.0)), 0.0) if f in port_funds else 0.0
+                 for f in funds}
         tot_inv = sum(w_inv.values())
         w_inv = {f: (v / tot_inv if tot_inv > 0 else 0.0) for f, v in w_inv.items()}
     except Exception:
-        w_inv = {f: 1.0 / len(funds) for f in funds}
-    w_eq = {f: 1.0 / len(funds) for f in funds}
+        w_inv = {f: (1.0 / len(port_funds) if f in port_funds else 0.0) for f in funds}
+    w_eq = {f: (1.0 / len(port_funds) if f in port_funds else 0.0) for f in funds}
     pd.DataFrame({
         "MarketValue": pd.Series(weights),
         "Invested": pd.Series(w_inv),
@@ -279,7 +295,7 @@ def main():
     pd.Series(weights, name="Weight").to_csv(os.path.join(OUT_DIR, "weights_current.csv"))
 
     vol_fund, vol_port, corr_avg, corr_pairs = _rolling_analytics(
-        returns_daily, funds, weights)
+        returns_daily, funds, weights, port_funds=port_funds)
     vol_fund.to_csv(os.path.join(OUT_DIR, "rolling_vol_fund.csv"))
     vol_port.to_csv(os.path.join(OUT_DIR, "rolling_vol_portfolio.csv"))
     corr_avg.to_csv(os.path.join(OUT_DIR, "rolling_corr_avg.csv"))

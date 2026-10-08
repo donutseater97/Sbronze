@@ -141,22 +141,38 @@ updater merges new rows over existing ones.
 ### `funds.csv` — the fund catalogue
 | Column | Meaning |
 |---|---|
-| `Fund` | Short label / key used everywhere (e.g. `US`, `EU HY`). |
+| `Fund` | Short label / key used everywhere (e.g. `US (a)`, `EU HY`). |
+| `Status` | `Active`, `Closed` (position closed, no replacement) or `Subbed` (replaced by another fund via a switch, e.g. `US (old)` → `US (a)`). Funds that are not `Active` and have zero units are off by default in the fund filters. |
 | `Ticker` | Morningstar ID (e.g. `0P0001CRXW`); used for Morningstar and InvestGo. |
 | `ISIN` | Fund ISIN; used for JPMorgan/Fidelity/BlackRock/UBS official sources. |
 | `Fund Name` | Full legal name. Detection of `"JPMorgan"` here routes the NAV source. |
 | `Type` | `Equity` or `Bond`. |
 | `Colour` | Hex colour for that fund across all charts/tables. |
-| `URL` | Official fund page (rendered as a link in *Active Funds*). |
+| `URL` | Official fund page (rendered as a link in *Funds*). |
 
-### `transaction_history.csv` — your purchases
+### `transaction_history.csv` — purchases and switches
 | Column | Meaning |
 |---|---|
 | `Date` | Transaction date. |
 | `Fund` | Fund key (matches `funds.csv`). |
-| `Price (€)` | NAV paid per unit. |
-| `Quantity` | Units bought. |
+| `Price (€)` | NAV per unit. |
+| `Quantity` | Units bought (positive) or switched out (negative). |
 | `Fees (€)` | Fees for that transaction. |
+| `Operation` | `Buy`, `Switch Out` or `Switch In`. |
+| `Linked Fund` | For switches, the counterpart fund (empty for `Buy`). |
+
+**Switches.** Moving a position between funds (e.g. `US (old)` → `US (a)`, same
+strategy, different share class) is recorded as two rows: a `Switch Out` on the
+source fund (negative units) and a `Switch In` on the target fund (units
+received at its own NAV; switch fees on this leg). Accounting rules
+(`utils/transactions.py`):
+- A switch is not a contribution: totals and contribution counts use `Buy` rows
+  only, and switches between two selected funds cancel out.
+- Per fund, `Return = Market Value + value switched out − contributions`. The
+  source fund therefore shows its **realized** result; the target fund starts
+  with contributions = value switched in.
+- Portfolio totals follow the fund **lineage**: funds switched into a selected
+  fund are included, so the realized result of `US (old)` stays in the totals.
 
 ### `historical_data.csv` — daily NAV matrix
 `Date` plus one column per fund key, each holding that day's NAV. Written by
@@ -235,7 +251,10 @@ per-row **P/L** columns: `P/L (€)` = `Quantity × (latest NAV − Price paid)`
 `P/L (%)` = `(latest NAV / Price − 1) × 100` — the current gain/loss on each
 tranche (fees are already reflected in the purchased quantity, so they are not
 subtracted again). Under privacy all value columns are masked except `Price`
-(public NAV) and `P/L (%)`; `P/L (€)` is masked.
+(public NAV) and `P/L (%)`; `P/L (€)` is masked. An `Operation` column flags
+switch rows (`⇄ Switch Out → …` / `⇄ Switch In ← …`): they show the transferred
+value, no theoretical deltas, and are excluded from the contribution totals.
+Tranches of a fund fully switched out use the exit NAV for their P/L.
 
 ### Morningstar API data (`morningstar_api_data.py`)
 A reconstructed portfolio X-Ray from Morningstar's public `security_details`
@@ -245,9 +264,9 @@ Box (equity + bonds), and a filterable, scrollable look-through **Holdings**
 accordion. Includes a **Data freshness** panel (see below) and a per-fund
 completeness disclaimer.
 
-### Active Funds (`active_funds.py`)
-The fund catalogue with a clickable `URL` link column to each official fund
-page.
+### Funds (`active_funds.py`)
+The fund catalogue with a `Status` column (Active / Closed / Subbed) and a
+clickable `URL` link column to each official fund page.
 
 ### Portfolio Analysis (`portfolio_analysis.py`)
 A risk & correlation dashboard. It reads the pre-computed CSVs from
@@ -276,7 +295,8 @@ schemes come from `weights.csv` (MarketValue / Invested / Equal), written by the
 compute script.
 
 ### Add Transactions & Funds (`add_transactions_and_funds.py`)
-**Admin-only.** Forms to add transactions and funds; writes back to the CSVs
+**Admin-only.** Forms to add transactions, record a **switch** between two funds
+(both rows in a single commit) and add funds; writes back to the CSVs
 (and to GitHub if a token is configured). Viewers and anonymous users see an
 admin-password prompt.
 
